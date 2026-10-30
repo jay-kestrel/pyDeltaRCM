@@ -1,2 +1,7 @@
 pytest
 pytest-mpl
+
+# image comparisons (pytest-mpl) are sensitive to matplotlib rendering
+# changes; bound the minor version so CI and local runs match the
+# baselines in tests/imgs_baseline/ (regenerate baselines when bumping)
+matplotlib>=3.11,<3.12

@@ -6,10 +6,14 @@ on:
   release:
     types:
       - published
+  workflow_dispatch:
 
 jobs:
   build-and-deploy-docs:
     runs-on: ubuntu-latest
+    permissions:
+      # the Pages deploy action pushes the built docs to the gh-pages branch
+      contents: write
 
     steps:
     - name: Checkout
@@ -33,7 +37,6 @@ jobs:
     - name: Build and test documentation
       run: |
         (cd docs && make docs)
-      continue-on-error: true
     - name: Upload log file
       uses: actions/upload-artifact@v7
       if: ${{ failure() }}
@@ -49,10 +52,7 @@ jobs:
         echo ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
     - name: Deploy to GitHub Pages
       uses: JamesIves/github-pages-deploy-action@v4
-      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/develop' }}
       with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: gh-pages
           FOLDER: docs/build/html
