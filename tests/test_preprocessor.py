@@ -2,6 +2,7 @@ import pytest
 
 import platform
 import os
+import warnings
 from pathlib import Path
 import glob
 import yaml
@@ -1666,3 +1667,158 @@ class TestQolUtilityFlags:
             tmp_path / "demo" / "pyDeltaRCM_demo.yaml"
         )
         mock_pp.return_value.run_jobs.assert_called_once()
+
+
+
+class TestDegenerateConfigErrors:
+    """Configurations that used to crash with bare ``TypeError`` /
+    ``numpy`` errors far from the cause must be rejected with a
+    descriptive typed error instead."""
+
+    def test_empty_yaml_file_model(self, tmp_path: Path, monkeypatch) -> None:
+        # an empty (or comment-only) YAML file parsed to None and crashed
+        #   the direct-model API with a bare TypeError/AttributeError
+        monkeypatch.chdir(tmp_path)
+        p = tmp_path / "empty.yaml"
+        p.write_text("# only a comment\n")
+        with pytest.warns(UserWarning, match="[Ee]mpty"):
+            _delta = DeltaModel(input_file=p)
+
+    def test_empty_yaml_file_preprocessor(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # an empty configuration plus the CLI duration, with out_dir from
+        #   the command line, as a batch driver would pass it
+        monkeypatch.chdir(tmp_path)
+        p = tmp_path / "empty.yaml"
+        p.write_text("")
+        with pytest.warns(UserWarning, match="[Ee]mpty"):
+            pp = preprocessor.Preprocessor(
+                input_file=p, timesteps=1, out_dir=str(tmp_path / "jobs")
+            )
+        assert len(pp.file_list) == 1
+
+    def test_empty_matrix_rejected(self, tmp_path: Path) -> None:
+        # matrix: {} expanded to np.prod([]) == 1.0 (a float) and crashed
+        #   with a numpy TypeError
+        p, f = utilities.create_temporary_file(tmp_path, "matrix.yaml")
+        f.write("out_dir: " + str(tmp_path / "jobs") + "\n")
+        f.write("matrix: {}\n")
+        f.close()
+        with pytest.raises(ValueError, match="matrix"):
+            preprocessor.Preprocessor(input_file=p, timesteps=1)
+
+    def test_scalar_matrix_value_rejected(self, tmp_path: Path) -> None:
+        # a scalar matrix value crashed inside len() with a TypeError
+        #   pointing at the wrong thing
+        p, f = utilities.create_temporary_file(tmp_path, "matrix.yaml")
+        f.write("out_dir: " + str(tmp_path / "jobs") + "\n")
+        f.write("matrix:\n  f_bedload: 0.2\n")
+        f.close()
+        with pytest.raises(ValueError, match="f_bedload"):
+            preprocessor.Preprocessor(input_file=p, timesteps=1)
+
+
+class TestRunDurationValidation:
+    """If outside (0, 1] and non-positive durations silently produced
+    zero-step "successful" runs; they must be rejected."""
+
+    def test_If_zero_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {"time": 86400.0})
+        with pytest.raises(ValueError, match=r"\bIf\b"):
+            preprocessor._SerialJob(
+                i=0, input_file=p, config_dict={"If": 0, "time": 86400.0}
+            )
+
+    def test_If_above_one_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {"time": 86400.0})
+        with pytest.raises(ValueError, match=r"\bIf\b"):
+            preprocessor._SerialJob(
+                i=0, input_file=p, config_dict={"If": 1.5, "time": 86400.0}
+            )
+
+    def test_negative_timesteps_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml")
+        with pytest.raises(ValueError, match="timesteps"):
+            preprocessor._SerialJob(
+                i=0, input_file=p, config_dict={"timesteps": -5}
+            )
+
+    def test_zero_time_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml")
+        with pytest.raises(ValueError, match="time"):
+            preprocessor._SerialJob(i=0, input_file=p, config_dict={"time": 0})
+
+    def test_negative_time_years_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml")
+        with pytest.raises(ValueError, match="time_years"):
+            preprocessor._SerialJob(
+                i=0, input_file=p, config_dict={"time_years": -0.5}
+            )
+
+
+class TestDurationPrecedenceWarning:
+    """When multiple run-duration keys are specified, ``timesteps`` takes
+    precedence (checked first in ``_BaseJob.__init__``); the effective
+    precedence must be announced instead of applied silently, and the CLI
+    help text must match the behavior."""
+
+    def test_timesteps_and_time_both_specified_warns(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {"timesteps": 2})
+        with pytest.warns(UserWarning, match="timesteps"):
+            job = preprocessor._SerialJob(
+                i=0, input_file=p, config_dict={"timesteps": 2, "time": 8640000.0}
+            )
+        assert job._time_type == "timesteps"
+
+    def test_single_duration_key_does_not_warn(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {"time": 86400.0})
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            job = preprocessor._SerialJob(
+                i=0, input_file=p, config_dict={"time": 86400.0}
+            )
+        assert job._time_type == "time"
+
+
+class TestStringResumeCheckpoint:
+    """``resume_checkpoint`` accepts a string path, but the preprocessor's
+    directory-exists guards used ``is True`` identity checks, so resuming
+    with a custom checkpoint folder raised ``FileExistsError`` in exactly
+    the scenario where resuming is intended."""
+
+    def test_string_resume_checkpoint_allows_existing_job_dir(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "jobs"
+        out.mkdir()
+        ckp = tmp_path / "ckp"
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"out_dir": out, "timesteps": 1, "resume_checkpoint": str(ckp)},
+        )
+        pp = preprocessor.Preprocessor(input_file=p)
+        assert len(pp.file_list) == 1
+
+    def test_bool_resume_checkpoint_still_allows_existing_job_dir(
+        self, tmp_path: Path
+    ) -> None:
+        out = tmp_path / "jobs"
+        out.mkdir()
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"out_dir": out, "timesteps": 1, "resume_checkpoint": True},
+        )
+        pp = preprocessor.Preprocessor(input_file=p)
+        assert len(pp.file_list) == 1
+
+    def test_no_resume_still_rejects_existing_job_dir(self, tmp_path: Path) -> None:
+        out = tmp_path / "jobs"
+        out.mkdir()
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"out_dir": out, "timesteps": 1}
+        )
+        with pytest.raises(FileExistsError):
+            preprocessor.Preprocessor(input_file=p)
