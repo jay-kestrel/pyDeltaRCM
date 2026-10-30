@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "timestamp_utc": "2026-10-30T18:53:56+00:00",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.41",
+    "python_version": "3.13.14",
+    "pyDeltaRCM_version": "2.3.0",
+    "pyDeltaRCM_git_commit": "bd905c8c8bdf91f1bd96eccd0bfa75625da1bed4",
+    "numpy_version": "2.5.4",
+    "numba_version": "0.68.1",
+    "scipy_version": "1.18.1"
+  },
+  "run_settings": {
+    "smoke": false,
+    "timed_updates": 20,
+    "warmup_updates": 5,
+    "morphology_threshold": 0.05,
+    "max_warmup_updates": 200
+  },
+  "scenarios": {
+    "early_water": {
+      "config": {
+        "water_backend": "python",
+        "Length": 3000.0,
+        "Width": 6000.0,
+        "dx": 50.0,
+        "grid_shape_rows_cols": [
+          60,
+          120
+        ],
+        "Np_water": 1000,
+        "Np_sed": 1000,
+        "itermax": 3,
+        "seed": 0,
+        "model_timestep_dt_s": 25000.0
+      },
+      "warmup": {
+        "type": "fixed",
+        "updates": 5,
+        "coverage_at_window_start": 0.0275
+      },
+      "timing": {
+        "n_updates": 20,
+        "mean_s": 0.5794615016500074,
+        "sd_s": 0.10603409500040295,
+        "median_s": 0.5524087254999586,
+        "min_s": 0.4526476119999643,
+        "max_s": 0.80532378099997,
+        "total_s": 11.589230033000149,
+        "per_update_times_s": [
+          0.7971360280000681,
+          0.80532378099997,
+          0.6779400020000139,
+          0.64899497600004,
+          0.6904944740001611,
+          0.6693273749999662,
+          0.5918608130000393,
+          0.5971880509998755,
+          0.575163762000102,
+          0.551899204999927,
+          0.5449561299999459,
+          0.5529182459999902,
+          0.5166713749999872,
+          0.5371795109999766,
+          0.4944205480001074,
+          0.5015066959999785,
+          0.4677415529999962,
+          0.45947176999993644,
+          0.4563881250001032,
+          0.4526476119999643
+        ]
+      }
+    }
+  }
+}
