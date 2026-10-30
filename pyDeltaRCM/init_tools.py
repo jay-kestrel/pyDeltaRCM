@@ -115,6 +115,16 @@ class init_tools(abc.ABC):
                 user_file.close()
             except ValueError as e:
                 raise e
+            if user_dict is None:
+                # an empty (or comment-only) YAML file parses to None;
+                #   treat it as an empty configuration rather than crashing
+                #   with a bare TypeError when it is iterated below
+                _msg = (
+                    "Input YAML file is empty: %s. Proceeding with the "
+                    "default configuration." % self.input_file
+                )
+                warnings.warn(UserWarning(_msg))
+                user_dict = dict()
         else:
             user_dict = dict()
 
@@ -537,6 +547,18 @@ class init_tools(abc.ABC):
         _input_N0_meters = float(self.N0_meters)
         self.L0 = max(1, min(int(round(self._L0_meters / self._dx)), self.L // 4))
         self.N0 = max(3, min(int(round(self._N0_meters / self._dx)), self.W // 4))
+
+        # the floors above are applied *after* the W//4 / L//4 caps, so on
+        #   small domains the floor defeats the cap and the inlet exceeds
+        #   the domain (e.g., N0=3 while W=1); that geometry is meaningless
+        if self.L0 > self.L or self.N0 > self.W:
+            raise ValueError(
+                "Inlet dimensions exceed the domain dimensions: "
+                "L0=%d (domain L=%d cells), N0=%d (domain W=%d cells). "
+                "Increase Width/Length or N0_meters/L0_meters, or use a "
+                "smaller dx." % (self.L0, self.L, self.N0, self.W)
+            )
+
         if self.L0 * self._dx != _input_L0_meters:
             pcw = ParameterChangedWarning(
                 "L0_meters", _input_L0_meters, self.L0 * self._dx
