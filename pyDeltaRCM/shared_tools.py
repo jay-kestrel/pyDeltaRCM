@@ -375,7 +375,7 @@ def custom_unravel(i: int, shape: Tuple[int, int]) -> Tuple[int, int]:
         >>> custom_unravel(5124, _shape)
         (25, 124)
     """
-    if i >= (shape[1] * shape[0]):
+    if i < 0 or i >= (shape[1] * shape[0]):
         raise IndexError("Index is out of array bounds")
     x = i // shape[1]
     y = i % shape[1]
