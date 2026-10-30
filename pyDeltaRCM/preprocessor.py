@@ -789,6 +789,11 @@ class _BaseJob(abc.ABC):
             DeltaModel = BaseDeltaModel
 
         self.deltamodel = DeltaModel(input_file=input_file, defer_output=defer_output)
+        # the job reports the finalize outcome to the model's log file
+        #   after finalize() returns, so the log handler release is the
+        #   job's responsibility (run() closes it after the last stage
+        #   message) instead of finalize()'s
+        self.deltamodel._defer_log_teardown = True
         _curr_time = self.deltamodel._time
 
         # process If
@@ -954,10 +959,6 @@ class _SerialJob(_BaseJob):
         super().__init__(
             i, input_file, config_dict, DeltaModel=DeltaModel, defer_output=False
         )
-        # the job logs its completion stages after finalize() returns, so
-        #   finalize must not remove the log file handler yet; the job
-        #   tears the handler down explicitly after its last message
-        self.deltamodel._defer_log_teardown = True
 
     def run(self) -> None:
         """Loop the model.
@@ -1136,6 +1137,12 @@ class _ParallelJob(_BaseJob, multiprocessing.Process):
             # if the finalization succeeds
             else:
                 self.queue.put({"job": self.i, "stage": 2, "code": 0})
+
+            # the model deferred its log handler teardown to this job (see
+            #   __init__); the stage reporting above is the final logging,
+            #   so release the handler now, exactly as finalize() would
+            #   have
+            self.deltamodel._teardown_log_handler()
 
         # ALWAYS release the semaphore, so other runs can continue
         finally:

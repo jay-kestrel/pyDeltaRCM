@@ -2,6 +2,7 @@ import pytest
 
 import platform
 import os
+import logging
 import warnings
 from pathlib import Path
 import glob
@@ -939,6 +940,35 @@ class TestPreprocessorRunJobs:
         job0_log = job0_logs[0].read_text()
         assert "job: 0, stage: 1, code: 0" in job0_log
         assert "job: 0, stage: 2, code: 0" in job0_log
+
+    def test_serial_job_releases_log_handler_after_run(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that a serial job releases the model's log handler.
+
+        The job defers the log handler release out of ``finalize`` so its
+        stage reporting reaches the log file, and must then release the
+        handler itself once the final stage message is written -- exactly
+        what a standalone model gets from ``finalize`` -- so batch runs do
+        not accumulate open file handles.
+        """
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"out_dir": tmp_path / "out_dir", "timesteps": 1},
+        )
+        pp = preprocessor.Preprocessor(p)
+        pp.run_jobs()
+
+        job = pp.job_list[0]
+        # the deferred release happened after the final stage message
+        assert job.deltamodel._log_fh is None
+        _fhs = [
+            h
+            for h in job.deltamodel.logger.handlers
+            if isinstance(h, logging.FileHandler)
+        ]
+        assert _fhs == []
 
     @pytest.mark.skipif(
         platform.system() != "Linux", reason="Parallel support only on Linux OS."
