@@ -15,6 +15,27 @@ from pyDeltaRCM import DeltaModel
 from pyDeltaRCM import preprocessor
 
 from .. import utilities
+from pyDeltaRCM.shared_tools import get_random_state, get_random_uniform
+
+
+def _write_unpickle_marker(path: str) -> None:
+    """Create a marker file; called only if a pickled payload executes."""
+    with open(path, "w") as f:
+        f.write("unpickled")
+
+
+class _UnpicklePayload:
+    """Picklable object whose unpickling creates a marker file.
+
+    Used to test that pickled checkpoint contents are never unpickled:
+    if the payload ever runs, the marker file exists.
+    """
+
+    def __init__(self, marker_path: str) -> None:
+        self.marker_path = marker_path
+
+    def __reduce__(self):
+        return (_write_unpickle_marker, (self.marker_path,))
 
 
 @mock.patch(
@@ -96,6 +117,92 @@ class TestCheckpointingIntegrations:
         assert np.all(resumeModel2.stage == resumeModel.stage)
         assert np.all(resumeModel2.sand_frac == resumeModel.sand_frac)
         assert np.all(resumeModel2.active_layer == resumeModel.active_layer)
+
+    def test_checkpoint_round_trips_rng_stream(self, tmp_path: Path) -> None:
+        """Test save → resume reproduces the exact random state and stream.
+
+        The checkpoint is written with plain arrays (no pickle), and the
+        resumed model continues the random stream exactly where the
+        checkpoint left off.
+        """
+        # producer model writes a checkpoint after a few fast updates
+        file_name = "rng_round_trip.yaml"
+        base_p, base_f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(base_f, "out_dir", tmp_path / "out_dir")
+        base_f.close()
+        producer = DeltaModel(input_file=base_p)
+
+        for _ in range(3):
+            producer.update()
+        producer.save_the_checkpoint()
+        saved_state = get_random_state()
+        producer_draws = [get_random_uniform(1.0) for _ in range(4)]
+        producer.finalize()
+
+        # the written checkpoint contains no pickled object arrays:
+        # loading it with allow_pickle=False must succeed for every field
+        ckp_file = os.path.join(producer.prefix, "checkpoint.npz")
+        with np.load(ckp_file, allow_pickle=False) as checkpoint:
+            for key in checkpoint.files:
+                _ = checkpoint[key]
+
+        # consumer model resumes from the checkpoint folder
+        file_name = "rng_round_trip_resume.yaml"
+        resume_p, resume_f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(resume_f, "out_dir", tmp_path / "out_dir2")
+        utilities.write_parameter_to_file(
+            resume_f, "resume_checkpoint", str(producer.prefix)
+        )
+        resume_f.close()
+        consumer = DeltaModel(input_file=resume_p)
+
+        # the resumed model continues the exact random stream
+        assert get_random_state() == saved_state
+        consumer_draws = [get_random_uniform(1.0) for _ in range(4)]
+        assert consumer_draws == producer_draws
+        consumer.finalize()
+
+    def test_checkpoint_with_pickled_rng_state_is_refused(
+        self, tmp_path: Path
+    ) -> None:
+        """Test a legacy pickled checkpoint raises without executing.
+
+        Checkpoints written before the pickle-free rng format (pyDeltaRCM
+        <= 2.3) carry a pickled object array. Loading such a file must
+        raise, and the payload embedded in the pickled object must never
+        be executed.
+        """
+        # build a model and write a legitimate checkpoint
+        p = utilities.yaml_from_dict(tmp_path, "producer.yaml")
+        producer = DeltaModel(input_file=p)
+        producer.save_the_checkpoint()
+        ckp_file = os.path.join(producer.prefix, "checkpoint.npz")
+        assert os.path.isfile(ckp_file)
+
+        # rewrite the checkpoint with the rng state as a pickled object
+        # array; unpickling the payload would create the marker file
+        marker = tmp_path / "unpickle-marker"
+        with np.load(ckp_file, allow_pickle=False) as checkpoint:
+            fields = {key: checkpoint[key] for key in checkpoint.files}
+        for key in ("rng_name", "rng_state_index", "rng_state_key"):
+            fields.pop(key)
+        fields["rng_state"] = np.array([_UnpicklePayload(str(marker))], dtype=object)
+        np.savez_compressed(ckp_file, **fields)
+
+        # resuming from the tampered checkpoint must fail loudly ...
+        resume_p, resume_f = utilities.create_temporary_file(
+            tmp_path, "resume_tampered.yaml"
+        )
+        utilities.write_parameter_to_file(resume_f, "out_dir", tmp_path / "out_dir2")
+        utilities.write_parameter_to_file(
+            resume_f, "resume_checkpoint", str(producer.prefix)
+        )
+        resume_f.close()
+        with pytest.raises(RuntimeError, match="pickle format"):
+            DeltaModel(input_file=resume_p)
+
+        # ... and the embedded payload must never have been executed
+        assert not marker.exists()
 
     def test_checkpoint_nc(self, tmp_path: Path) -> None:
         """Test the netCDF that is written to by the checkpointing."""
