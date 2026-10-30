@@ -346,3 +346,86 @@ class TestUpdateFlowField:
         assert np.all(delta.uw[dmask] != 0)
 
         assert delta.log_info.call_count == 1
+
+
+
+class TestGhostCellWeightFallback:
+    """Regression tests: pad-ghost cells must never be movement targets.
+
+    The all-zero-weight fallback in ``_get_weight_at_cell_water`` masked
+    candidate targets by wall type only. For row-0 cells, the padded
+    ghost cells *above* the domain replicate the row-0 cell's own
+    (channel) type, so they are "non-wall" and received weight; a parcel
+    picking one stepped out of the domain (``px == -1``), and the
+    negative flat index wrapped every subsequent flux write onto the
+    outflow row (the last row of the domain).
+    """
+
+    def _make_model(self, tmp_path: Path) -> DeltaModel:
+        # 20x10 domain with stepmax 5: no parcel can legitimately reach
+        # the outflow row (row 19) -- walking covers at most 5 rows from
+        # the inlet, and loop relocations are capped at ``L - 2`` -- so
+        # any flux written there is the negative-index wrap defect.
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {
+                "Length": 20.0,
+                "Width": 10.0,
+                "dx": 1.0,
+                "L0_meters": 1.0,
+                "N0_meters": 2.0,
+                "h0": 1.0,
+                "Np_water": 10,
+                "Np_sed": 100,
+                "f_bedload": 0.5,
+                "itermax": 1,
+                "seed": 0,
+                "stepmax": 5,
+                "verbose": 0,
+            },
+        )
+        return DeltaModel(input_file=p)
+
+    def _dry_channel_entrance(self, delta: DeltaModel) -> None:
+        # aggrade-dry the channel entrance: zero depth across the inlet
+        # strip and its flanking columns for the first three rows, so
+        # every in-domain neighbor of the row-0 inlet cells is dry or a
+        # wall and the zero-weight fallback fires on the first step
+        cols = delta.inlet
+        delta.depth[0:3, cols[0] - 1 : cols[-1] + 2] = 0
+
+    def test_weights_exclude_ghost_cells_at_dried_inlet(self, tmp_path: Path) -> None:
+        delta = self._make_model(tmp_path)
+        delta.log_info = mock.MagicMock()
+        self._dry_channel_entrance(delta)
+
+        delta.get_water_weight_array()
+
+        for col in delta.inlet:
+            wts = delta.water_weights[0, col, :]
+            # no weight on the padded ghost cells above the domain
+            assert np.sum(wts[0:3]) == 0
+            # remaining weights are a valid in-domain distribution
+            assert wts.sum() == pytest.approx(1)
+            assert np.sum(wts[3:]) == pytest.approx(1)
+
+    def test_run_water_iteration_flux_never_reaches_outflow_row(
+        self, tmp_path: Path
+    ) -> None:
+        delta = self._make_model(tmp_path)
+        delta.log_info = mock.MagicMock()
+        self._dry_channel_entrance(delta)
+
+        delta.init_water_iteration()
+        delta.run_water_iteration()
+
+        # every recorded parcel position is a valid in-domain flat index
+        # (unfixed, parcels picking ghost cells recorded negative indices)
+        assert delta.free_surf_walk_inds.min() >= 0
+
+        # no flux may reach the outflow row: with stepmax 5 no parcel can
+        # legitimately get there, so any nonzero value is the wrap
+        assert np.all(delta.qxn[-1, :] == 0)
+        assert np.all(delta.qyn[-1, :] == 0)
+        assert np.all(delta.qwn[-1, :] == 0)
