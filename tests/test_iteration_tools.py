@@ -805,3 +805,52 @@ class TestSaveGrids:
 
         # assert log was called when exception was raised
         assert _delta.log_info.call_count == 1
+
+
+class TestCustomTimeVaryingMetaVar:
+    def test_dict_format_time_tuple_updates(self, tmp_path: Path) -> None:
+        """
+        A custom meta variable specified in the documented dict format
+        with a proper one-element vardims tuple must be updated on every
+        save (the old gate keyed on len("time") == 4 only worked for the
+        built-in variables by accident).
+        """
+
+        class CustomMetaModel(DeltaModel):
+            def hook_init_output_file(self) -> None:
+                self._save_var_list["meta"]["custom_tv_var"] = dict(
+                    varname="custom_tv_var",
+                    varvalue="_time",
+                    varunits="seconds",
+                    vartype="f8",
+                    vardims=(self._netcdf_coords[0],),
+                    varlong="custom time-varying variable",
+                )
+
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"save_dt": 1, "save_metadata": True}
+        )
+        _delta = CustomMetaModel(input_file=p)
+
+        # mock the log_info and the actual output routines
+        _delta.log_info = mock.MagicMock()
+        _delta.make_figure = mock.MagicMock()
+        _delta.save_figure = mock.MagicMock()
+        _delta.save_grids = mock.MagicMock()
+
+        exp_path_nc = os.path.join(tmp_path / "out_dir", "pyDeltaRCM_output.nc")
+
+        for _t in range(0, 3):
+            _delta._time += 100
+            _delta.save_grids_and_figs()
+            _delta._save_iter += 1
+
+        # close the file and connect
+        _delta.output_netcdf.close()
+        ds = netCDF4.Dataset(exp_path_nc, "r", format="NETCDF4")
+
+        # the variable must have been written on every save
+        assert ds["auxdata"]["custom_tv_var"].shape[0] == 4  # init + 3
+        vals = ds["auxdata"]["custom_tv_var"][:]
+        assert np.all(np.diff(vals) > 0)
+        ds.close()

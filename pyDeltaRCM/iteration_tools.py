@@ -341,11 +341,11 @@ class iteration_tools(abc.ABC):
             for _val in self._save_var_list["meta"].keys():
                 # get the values from either list or dict
                 if isinstance(self._save_var_list["meta"][_val], list):
-                    _dims = len(self._save_var_list["meta"][_val][3])
+                    _vardims = self._save_var_list["meta"][_val][3]
                     _modelvar = self._save_var_list["meta"][_val][0]
                     _ncvar = _val
                 else:
-                    _dims = len(self._save_var_list["meta"][_val]["vardims"])
+                    _vardims = self._save_var_list["meta"][_val]["vardims"]
                     _modelvar = self._save_var_list["meta"][_val]["varvalue"]
                     _ncvar = self._save_var_list["meta"][_val]["varname"]
 
@@ -353,8 +353,16 @@ class iteration_tools(abc.ABC):
                 if _modelvar is None:
                     _modelvar = _val
 
+                # normalize vardims (built-ins store a bare string, custom
+                #   dict-format entries use tuples) and gate on the time
+                #   coordinate explicitly — the old len(dims) > 2 check only
+                #   worked by accident of the coordinate string's length
+                _dims = (
+                    (_vardims,) if isinstance(_vardims, str) else tuple(_vardims)
+                )
+
                 # use knowledge of time-varying values to save them
-                if _dims > 2:
+                if len(_dims) > 0 and _dims[0] == self._netcdf_coords[0]:
                     self.output_netcdf[self._subgroup_name][_ncvar][save_idx] = getattr(
                         self, _modelvar
                     )

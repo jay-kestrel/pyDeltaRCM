@@ -114,7 +114,7 @@ class sed_tools(abc.ABC):
         _msg = "Determining sand parcel start indicies"
         self.log_info(_msg, verbosity=2)
 
-        num_starts = int(self._Np_sed * self._f_bedload)
+        num_starts = int(round(self._Np_sed * self._f_bedload))
         inlet_weights = self.get_inlet_weights_sediment(parcel_type="sand")
         start_indices = get_start_indices(self.inlet, inlet_weights, num_starts)
 
@@ -180,7 +180,10 @@ class sed_tools(abc.ABC):
         _msg = "Determining mud parcel start indicies"
         self.log_info(_msg, verbosity=2)
 
-        num_starts = int(self._Np_sed * (1 - self._f_bedload))
+        # derive the mud count from the rounded sand count so the split
+        #   always sums to _Np_sed (independent int() truncation loses one
+        #   parcel of supply for non-representable f_bedload fractions)
+        num_starts = self._Np_sed - int(round(self._Np_sed * self._f_bedload))
         inlet_weights = self.get_inlet_weights_sediment(parcel_type="mud")
         start_indices = get_start_indices(self.inlet, inlet_weights, num_starts)
 
@@ -1023,7 +1026,11 @@ class MudRouter(BaseRouter):
                 self.mod_stable_weight[px, py],
             )
 
-        if U_loc > self.U_ero_mud:
+        # regimes are meant to be exclusive; with non-default coefficients
+        #   (U_dep_mud > U_ero_mud) both conditions can hold, and the old
+        #   second-if reassignment silently discarded the computed
+        #   deposition. Deposit-first keeps the computed deposition.
+        elif U_loc > self.U_ero_mud:
             Vp_change = self._compute_Vp_ero(
                 self.Vp_sed, U_loc, self.U_ero_mud, self._beta, ero_mod_loc
             )
