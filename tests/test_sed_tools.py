@@ -201,3 +201,68 @@ class TestGetWeightAtCellSedimentFallback:
         assert np.any(weights[0:3] > 0)
         assert weights.sum() == pytest.approx(1.0)
 
+
+
+class TestParcelSupplySplit:
+
+    @pytest.mark.parametrize("f_bedload", [0.55, 1 / 3])
+    def test_parcel_counts_sum_to_Np_sed(
+        self, tmp_path: Path, f_bedload: float
+    ) -> None:
+        """
+        Sand and mud parcel counts must sum to Np_sed exactly;
+        independent int() truncation silently loses one parcel of
+        sediment supply per timestep for non-representable fractions.
+        """
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"Np_sed": 1000, "f_bedload": f_bedload}
+        )
+        _delta = DeltaModel(input_file=p)
+
+        # mock top-level methods / objects
+        _delta.log_info = mock.MagicMock()
+        _delta._sr = mock.MagicMock()
+        _delta._mr = mock.MagicMock()
+
+        _delta.route_all_sand_parcels()
+        _delta.route_all_mud_parcels()
+
+        n_sand = _delta._sr.run.call_args[0][0].shape[0]
+        n_mud = _delta._mr.run.call_args[0][0].shape[0]
+        assert n_sand + n_mud == 1000
+
+
+class TestMudDepositOrErode:
+
+    def test_deposit_not_discarded_when_thresholds_overlap(
+        self, tmp_path: Path
+    ) -> None:
+        """
+        With U_dep_mud > U_ero_mud (non-default coefficients), cells whose
+        velocity lies between the thresholds hit both branches; the
+        computed deposition must not be silently discarded by the
+        erosion reassignment.
+        """
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml",
+            {"coeff_U_dep_mud": 2.0, "Np_sed": 100, "f_bedload": 0.0,
+             "stepmax": 10000},
+        )
+        _delta = DeltaModel(input_file=p)
+
+        # put every cell's velocity between the erosion and (now higher)
+        #   deposition thresholds, so deposit_or_erode hits both branches
+        U_loc = (_delta.U_ero_mud + _delta.U_dep_mud) / 2
+        assert U_loc > _delta.U_ero_mud
+        assert U_loc < _delta.U_dep_mud
+        _delta.uw[:, :] = U_loc
+
+        # with the defect, every deposit_or_erode call is a net erosion
+        #   (the computed deposition is discarded), so the bed shrinks
+        eta0 = _delta.eta.sum()
+        _delta.route_all_mud_parcels()
+
+        # the deposition branch must win: the bed grows overall and
+        #   deposited volume is recorded
+        assert _delta.eta.sum() > eta0
+        assert _delta.Vp_dep_mud.sum() > 0

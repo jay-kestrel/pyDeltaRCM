@@ -119,14 +119,18 @@ class TestConsistentOutputsBetweenMerges:
         for _ in range(0, 3):
             delta.update()
 
+        # expected values regenerated for the sediment parcel-supply fix:
+        #   the sand/mud parcel split now conserves _Np_sed (round-based
+        #   split), so this f_bedload=0.05 / Np_sed=10 configuration routes
+        #   10 mud parcels per step instead of the previously truncated 9
         # slice is: test_DeltaModel.eta[:5, 62]
-        _exp1 = np.array([-4.976912, -4.979, -7.7932253, -4.9805, -2.7937498])
+        _exp1 = np.array([-4.9760194, -6.229, -4.97975, -3.7305002, -3.7312498])
         assert np.all(delta.eta[:5, 62] == pytest.approx(_exp1))
 
         for _ in range(0, 10):
             delta.update()
 
-        _exp2 = np.array([-4.9614887, -3.4891236, -12.195051, -4.6706524, -2.7937498])
+        _exp2 = np.array([-4.961186, -4.0956697, -7.7974696, -1.1584876, -1.5560557])
         assert np.all(delta.eta[:5, 62] == pytest.approx(_exp2))
         delta.finalize()
 
