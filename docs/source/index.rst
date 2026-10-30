@@ -29,6 +29,7 @@ Project information
 .. toctree::
    :maxdepth: 1
 
+   meta/about_this_fork
    meta/installing
    meta/contributing
    meta/license
@@ -72,4 +73,5 @@ Developer documentation
    :maxdepth: 3
 
    guides/developer_guide
+   guides/benchmarking
    reference/index

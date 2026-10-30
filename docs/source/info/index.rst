@@ -20,4 +20,5 @@ All of these questions and more are answered here!
    hydrodynamics
    morphodynamics
    outputfile
+   technical_specification
    ../reference/model/model_hooks
