@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-from numba import config as numba_config
 
 from pyDeltaRCM import DeltaModel, _native, native_water, shared_tools, water_tools
 
@@ -64,11 +63,8 @@ def test_surface_kernels_equal_reference_on_identical_walks(model, sea_level, ev
         model._Nsmooth,
         model._Csmooth,
     )
-    if numba_config.DISABLE_JIT:
-        # NumPy uses a pairwise float32 sum; Numba (and Rust) sum in order.
-        np.testing.assert_allclose(result["Hsmth"], smoothed, rtol=1e-6, atol=0)
-    else:
-        np.testing.assert_array_equal(result["Hsmth"], smoothed)
+    # NumPy uses a pairwise float32 sum; Rust sums sequentially.
+    np.testing.assert_allclose(result["Hsmth"], smoothed, rtol=1e-6, atol=0)
 
 
 @pytest.mark.parametrize(
@@ -108,6 +104,22 @@ def test_duplicate_inlet_parcels_contribute_all_discharge(model, monkeypatch, co
     assert result["qwn"].ravel()[start] == expected
 
 
+def test_absolute_flux_preserves_numba_arithmetic():
+    # Preserve numba/Rust float64 intermediates before each float32 store.
+    # Pure NumPy scalar promotion instead produces 0.44999998807907104.
+    actual = water_tools._update_absQfield(
+        np.array([0.225], dtype=np.float32),
+        np.ones(3),
+        np.zeros(3, dtype=np.int64),
+        np.ones(3, dtype=bool),
+        0.15,
+        1.0,
+    )
+    np.testing.assert_array_equal(
+        actual, np.array([0.44999995827674866], dtype=np.float32)
+    )
+
+
 def test_native_repeat_is_bit_identical(model):
     args = native_water.phase_inputs(model)
     first = _native.water_phase(*args, 919)
@@ -116,10 +128,6 @@ def test_native_repeat_is_bit_identical(model):
         np.testing.assert_array_equal(first[name], second[name])
 
 
-@pytest.mark.skipif(
-    numba_config.DISABLE_JIT,
-    reason="Existing checkpoint helpers persist the Numba RNG, not NumPy's no-JIT stream",
-)
 def test_checkpoint_stream_replays_native_phase(model):
     starts = model.start_indices.copy()
     stage = model.stage.copy()

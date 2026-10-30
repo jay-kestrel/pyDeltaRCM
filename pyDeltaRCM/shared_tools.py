@@ -6,7 +6,7 @@ import yaml
 from typing import Dict, Iterator, Type, Tuple
 
 import numpy as np
-from numba import njit, _helperlib
+import threading
 
 # tools shared between deltaRCM water and sediment routing
 
@@ -87,92 +87,38 @@ def resolve_type_spec(spec):
     return [resolve_type_name(_v) for _v in spec]
 
 
-@njit
+_rng_local = threading.local()
+
+
+def _random_generator() -> np.random.RandomState:
+    """Keep the legacy MT19937 stream separate from application NumPy draws."""
+    if not hasattr(_rng_local, "generator"):
+        _rng_local.generator = np.random.RandomState()
+    return _rng_local.generator
+
+
 def set_random_seed(_seed: int) -> None:
-    """Set the random seed from an integer.
+    """Seed the model's thread-local MT19937 stream.
 
-    Set the seed of the random number generator with a single integer.
-    Importantly, this function will affect the state of the `numba` random
-    number generator, rather than the `numpy` generator.
-
-    This function is called during model intialization, but is **not** called
-    during loading a model from checkpoint
-    (:meth:`~pyDeltaRCM.init_tools.init_tools.load_checkpoint`) where the
-    random number generator state is configured via the
-    :func:`set_random_state` function.
-
-    .. important::
-
-        This function is preferred to setting the random seed directly. If you
-        are working with model subclassing, interacting with the `numpy`
-        random number generator directly will lead to a model that is **not
-        reproducible!**
-
-    Internally, the method is simply the below line; however it is *crucial*
-    this happens inside a jitted function, in order to affect the state of the
-    `numba` random number generator seed.
-
-    .. code::
-
-        np.random.seed(_seed)
-
-    Parameters
-    ----------
-    _seed : :obj:`int`
-        Integer to use as the random number generator seed. Should be in
-        interval ``[0, 2^32]``.
+    Use this helper rather than ``np.random.seed``. Native phases draw their
+    seeds from this checkpointed stream; their internal Xoshiro draws are
+    independent. Loading a checkpoint calls :func:`set_random_state` instead.
     """
-    np.random.seed(_seed)
+    _random_generator().seed(_seed)
 
 
 def get_random_state():
-    """Get the random state as a tuple.
-
-    Get the random state from a tuple in the form returned by
-    :func:`numba._helperlib.rnd_get_state`. This tuple contains the
-    necessary information for resuming a checkpoint from the exact same random
-    number generator state.
-
-    .. important::
-
-        You probably do not need to use this function. Be sure you know
-        *exactly* how you are affecting the random number generator state
-        before using this function, or you are likely to create a model that
-        cannot be peproduced.
-
-    See also :func:`set_random_seed`.
-
-    Returns
-    -------
-    state : :obj:`tuple`
-        Random number generator state as a tuple.
-    """
-    ptr = _helperlib.rnd_get_np_state_ptr()
-    return _helperlib.rnd_get_state(ptr)
+    """Return the legacy ``(position, keys)`` checkpoint tuple."""
+    _, keys, position, _, _ = _random_generator().get_state()
+    return int(position), keys.tolist()
 
 
 def set_random_state(_state_tuple) -> None:
-    """Set the random state from a tuple.
+    """Restore a validated MT19937 ``(position, keys)`` checkpoint tuple."""
+    position, keys = _state_tuple
+    _random_generator().set_state(("MT19937", np.asarray(keys, dtype=np.uint32),
+                                   position, 0, 0.0))
 
-    Set the random state from a tuple in the form returned by
-    :func:`numba._helperlib.rnd_get_state`.
-
-    .. important::
-
-        You probably do not need to use this function. Be sure you know
-        *exactly* how you are affecting the random number generator state
-        before using this function, or you are likely to create a model that
-        cannot be peproduced.
-
-    See also :func:`set_random_seed`.
-
-    Parameters
-    ----------
-    state : :obj:`tuple`
-        Random number generator state as a tuple.
-    """
-    ptr = _helperlib.rnd_get_np_state_ptr()
-    _helperlib.rnd_set_state(ptr, _state_tuple)
 
 
 # name and key length of the random number generator used by numba, recorded
@@ -264,7 +210,6 @@ def unpack_rng_state(
     return (index, [int(v) for v in rng_state_key])
 
 
-@njit
 def get_random_uniform(limit: float) -> float:
     """Get a random number from the uniform distribution.
 
@@ -303,7 +248,7 @@ def get_random_uniform(limit: float) -> float:
         0.07151893663724194
 
     """
-    return np.random.uniform(0, limit)
+    return _random_generator().uniform(0, limit)
 
 
 def get_inlet_weights(inlet):
@@ -330,7 +275,6 @@ def get_inlet_weights(inlet):
     return inlet_weights
 
 
-@njit
 def get_start_indices(
     inlet: np.ndarray, inlet_weights: np.ndarray, num_starts: int
 ) -> np.ndarray:
@@ -365,7 +309,6 @@ def get_start_indices(
     return inlet.take(idxs)
 
 
-@njit
 def get_steps(new_direction: int, iwalk, jwalk) -> Tuple[float, int, int, bool]:
     """Find the values given the next step.
 
@@ -380,7 +323,6 @@ def get_steps(new_direction: int, iwalk, jwalk) -> Tuple[float, int, int, bool]:
     return dist, istep, jstep, astep
 
 
-@njit
 def random_pick(prob):
     """Pick number from weighted array.
 
@@ -404,7 +346,6 @@ def random_pick(prob):
     return arr[np.searchsorted(cumprob, get_random_uniform(cumprob[-1]))]
 
 
-@njit("UniTuple(int64, 2)(int64, UniTuple(int64, 2))")
 def custom_unravel(i: int, shape: Tuple[int, int]) -> Tuple[int, int]:
     """Unravel indexes for 2D array.
 
@@ -453,7 +394,6 @@ def custom_unravel(i: int, shape: Tuple[int, int]) -> Tuple[int, int]:
     return x, y
 
 
-@njit("int64(UniTuple(int64, 2), UniTuple(int64, 2))")
 def custom_ravel(tup: Tuple[int, int], shape: Tuple[int, int]) -> int:
     """Ravel indexes for 2D array.
 
@@ -499,7 +439,6 @@ def custom_ravel(tup: Tuple[int, int], shape: Tuple[int, int]) -> int:
     return x + y
 
 
-@njit
 def custom_pad(arr: np.ndarray) -> np.ndarray:
     """Pad an array.
 
@@ -579,7 +518,6 @@ def custom_pad(arr: np.ndarray) -> np.ndarray:
     return pad
 
 
-@njit
 def get_weight_sfc_int(stage, stage_nbrs, qx, qy, ivec, jvec, distances):
     """Determine random walk weight surfaces.
 

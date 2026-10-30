@@ -44,7 +44,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numba
 import numpy as np
 import scipy
 
@@ -374,7 +373,7 @@ def collect_metadata() -> dict:
         "pyDeltaRCM_version": pyDeltaRCM.__version__,
         "pyDeltaRCM_git_commit": git_commit(),
         "numpy_version": np.__version__,
-        "numba_version": numba.__version__,
+        "numba_version": None,
         "scipy_version": scipy.__version__,
     }
 
@@ -565,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     for name in scenario_names:
         model_config = build_model_config(args.smoke)
-        print(f"[{name}] initializing model (numba compiles on first update)...",
+        print(f"[{name}] initializing model...",
               file=sys.stderr, flush=True)
         results["scenarios"][name] = run_scenario(
             name,

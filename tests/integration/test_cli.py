@@ -289,8 +289,7 @@ class TestQolCommandLineFlags:
         test the --demo flag writes and runs a tiny demonstration model.
         """
         env = os.environ.copy()
-        env['NUMBA_DISABLE_JIT'] = '1'
-        env['DISABLE_JIT'] = '1'  # matches the .numba_config.yaml key used in CI
+        env['PYDELTARCM_NATIVE'] = '0'
         demo_dir = tmp_path / 'demo'
         subprocess.check_output(
             ['pyDeltaRCM', '--demo', str(demo_dir)], env=env)

@@ -1,6 +1,6 @@
 """Bed-following water-weight kernel for the submarine-fan model.
 
-This module provides the jitted replacement for the stock water-weight kernel
+This module provides the NumPy replacement for the stock water-weight kernel
 (:obj:`pyDeltaRCM.water_tools._get_water_weight_array`) used by
 :obj:`pyDeltaRCM.submarine.SubmarineFanModel`.
 
@@ -15,13 +15,11 @@ unchanged (feasibility spike ``spikes/SPIKE_DECISION.md``, spec ``V1``).
 """
 
 import numpy as np
-from numba import njit
 
 from pyDeltaRCM.shared_tools import custom_pad, get_weight_sfc_int
 from pyDeltaRCM.water_tools import _get_weight_at_cell_water
 
 
-@njit
 def _get_bed_following_water_weight_array(
     depth,
     eta,
