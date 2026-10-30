@@ -233,3 +233,61 @@ The preferred way to slice is by 1) padding the array with :func:`~pyDeltaRCM.sh
             np.all(self.eta[i, j] > eta_nbrs)
 
 There are also several model attributes that may be helpful in development; we suggest using these builtins rather than creating your own whenever possible (see :meth:`~pyDeltaRCM.init_tools.init_tools.set_constants` and the model source code).
+
+
+Continuous integration
+======================
+
+Pull requests and pushes run through two GitHub Actions workflows, ``build.yml`` and ``benchmark.yml``.
+
+The ``build.yml`` workflow defines three jobs:
+
+* **test** — a matrix of three operating systems (Ubuntu, macOS, Windows) and Python 3.11, 3.12, and 3.13, which installs the package and runs ``python -m pytest --mpl --mpl-baseline-path=tests/imgs_baseline``. Because pytest's ``addopts`` include ``--doctest-modules`` (see `The --doctest-modules gotcha`_), this job executes docstring examples too.
+* **coverage** — the same three operating systems, pinned to Python 3.13, running pytest with ``tests/integration/`` ignored and coverage uploaded to Codecov. JIT compilation is disabled for coverage runs by writing ``DISABLE_JIT: 1`` to ``.numba_config.yaml`` (see `Coverage without JIT`_).
+* **docs** — Ubuntu on Python 3.13, installing the LaTeX packages needed for the high-resolution plot output (``latexmk``, ``texlive-latex-recommended``, ``texlive-latex-extra``, ``texlive-fonts-recommended``, ``dvipng``), then running ``(cd docs && make docs)``. This job builds the Sphinx doctests and the HTML site; on failure, the build log is uploaded as an artifact.
+
+The ``benchmark.yml`` workflow (a fork addition, see :doc:`/meta/about_this_fork`) runs the benchmark harness in smoke mode — ``python benchmarks/benchmark_timestep.py --smoke`` — on pull requests and on pushes to ``develop``, and uploads the results as an artifact. See :doc:`benchmarking` for what the smoke preset runs.
+
+Building the documentation locally
+==================================
+
+To build the documentation, install the runtime requirements, the documentation requirements, and the package itself:
+
+.. code:: console
+
+    $ pip install -r requirements.txt
+    $ pip install -r requirements-docs.txt
+    $ pip install .
+
+Rendering the example figures locally additionally requires the LaTeX packages that the CI docs job installs: ``latexmk``, ``texlive-latex-recommended``, ``texlive-latex-extra``, ``texlive-fonts-recommended``, and ``dvipng``.
+
+Then, from the repository root:
+
+.. code:: console
+
+    $ (cd docs && make docs)
+
+The ``docs`` target first runs the Sphinx doctest builder, which *executes* the ``.. doctest::`` blocks (including constructing real :obj:`~pyDeltaRCM.model.DeltaModel` instances), then the linkcheck builder — broken links are logged to the console but do not fail the build — and finally builds the HTML output. The ``.. plot::`` directives also execute Python at build time to render embedded figures, and several examples rely on the committed checkpoint resources in ``docs/source/_resources/``, so that directory should not be removed.
+
+The --doctest-modules gotcha
+============================
+
+The pytest ``addopts`` configuration in ``pyproject.toml`` includes ``--doctest-modules``, which makes pytest collect and execute docstring examples as tests. This means:
+
+* docstring examples run as part of the nine-combination test matrix, on every platform and Python version, not only in the docs build; and
+* editing a docstring example can fail the **test** job even when the docs job still passes.
+
+When touching docstrings or their examples, run pytest — not only ``make docs`` — before pushing. Documentation-only changes (``.rst`` files) do not affect this job.
+
+Coverage without JIT
+====================
+
+The coverage job disables numba's just-in-time compilation so that pure-Python line coverage is measured. Locally, the same behavior is available by writing ``DISABLE_JIT: 1`` into an (untracked) ``.numba_config.yaml`` file at the repository root before running pytest.
+
+Release flow
+============
+
+Publishing a GitHub release triggers two workflows:
+
+* ``deploy.yml`` builds the sdist and wheel and uploads to PyPI using trusted publishing. It currently uploads twice — once via ``twine upload dist/*`` and once via the ``pypa/gh-action-pypi-publish`` action — with ``skip-existing: true`` masking the redundancy.
+* ``docs.yml`` ("docs on release") also runs when a release is published, building the documentation with ``continue-on-error: true``. Its deploy-to-gh-pages step, however, requires ``event_name == 'push'`` *and* ``ref == 'refs/heads/develop'`` — conditions that can never be true for a release-triggered run — so the deploy step is dead code as written. GitHub Pages is not enabled for this repository, and the rendered documentation at ``deltarcm.org`` is upstream's (see :doc:`/meta/about_this_fork`).
