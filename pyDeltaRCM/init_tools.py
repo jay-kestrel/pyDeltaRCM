@@ -1,4 +1,5 @@
 import os
+import itertools
 import logging
 import warnings
 import platform
@@ -22,6 +23,35 @@ from pyDeltaRCM.shared_tools import (
 from pyDeltaRCM.sed_tools import MudRouter, SandRouter
 
 # tools for initiating deltaRCM model domain
+
+# process-local counter distinguishing model instances; logger names are
+# never derived from filesystem paths or the wall clock
+_INSTANCE_COUNT = itertools.count()
+
+
+class TimestepContext(logging.Filter):
+    """Stamp model time onto every record from the owning model.
+
+    The filter reads the model's private time attributes, so log-file lines
+    locate their record in model time without each call site formatting it.
+    Records emitted where the timing attributes do not exist (e.g., very
+    early initialization) carry an empty stamp.
+    """
+
+    def __init__(self, model) -> None:
+        super().__init__()
+        self._model = model
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.timestep_part = (
+                f"[t={self._model._time:.1f}, "
+                f"step={self._model._time_iter}] "
+            )
+        except AttributeError:
+            # records emitted before/after model timing exists
+            record.timestep_part = ""
+        return True
 
 
 class init_tools(abc.ABC):
@@ -104,23 +134,58 @@ class init_tools(abc.ABC):
         The logger is initialized regardless of the value of ``self.verbose``.
         The level of information printed to the log depends on the verbosity
         setting.
+
+        The logger is a namespaced child of the package logger, named
+        ``pyDeltaRCM.model.{n}`` from a process-local counter -- never a
+        filesystem path. It owns exactly one ``FileHandler`` for the per-run
+        log file, and propagation is disabled so records never reach a host
+        application's root handlers uninvited; hosts opt in with
+        ``dm.logger.propagate = True``. Re-initialization replaces the file
+        handler rather than stacking, and :obj:`finalize` releases it.
         """
-        # create the logging file handler
+        # single clock read names the log file for this initialization
         timestamp = time_lib.strftime("%Y%m%d-%H%M%S")
-        fh = logging.FileHandler(
-            os.path.join(self.prefix_abspath, "pyDeltaRCM_" + timestamp + ".log")
-        )
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        fh.setFormatter(formatter)
 
-        timestamp = time_lib.strftime("%Y%m%d-%H%M%S")
-        self.logger = logging.getLogger(self.prefix_abspath + timestamp)
-        self.logger.setLevel(logging.INFO)
+        # release the file handler from a previous initialization on this
+        # instance, so re-initialization replaces rather than stacks
+        if getattr(self, "_log_fh", None) is not None:
+            self.logger.removeHandler(self._log_fh)
+            self._log_fh.close()
+            self._log_fh = None
 
+        self.logger = logging.getLogger(
+            f"pyDeltaRCM.model.{next(_INSTANCE_COUNT):03d}")
         self.logger.setLevel(logging.DEBUG)
+        self.logger.propagate = False
 
-        # add handler to logger object
+        # idempotent wiring: the logger must not already carry a file handler
+        for _h in [
+            _h for _h in self.logger.handlers
+            if isinstance(_h, logging.FileHandler)
+        ]:
+            self.logger.removeHandler(_h)
+            _h.close()
+
+        # create the logging file handler
+        log_file_name = f"pyDeltaRCM_{timestamp}.log"
+        fh = logging.FileHandler(
+            os.path.join(self.prefix_abspath, log_file_name)
+        )
+        fh.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(timestep_part)s%(message)s"
+            )
+        )
+        fh.addFilter(TimestepContext(self))
         self.logger.addHandler(fh)
+        self._log_fh = fh
+
+        # console visibility is a per-record flag (``console=True``); no
+        # record is marked yet, so stdout behavior is unchanged
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setFormatter(logging.Formatter("%(message)s"))
+        ch.addFilter(lambda record: getattr(record, "console", False))
+        self.logger.addHandler(ch)
 
         # initialize verbosity as full, will get overwritten later
         self._verbose = 2
