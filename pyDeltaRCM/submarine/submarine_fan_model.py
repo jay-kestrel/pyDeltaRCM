@@ -11,6 +11,9 @@ import warnings
 import numpy as np
 
 from pyDeltaRCM.model import DeltaModel
+from pyDeltaRCM.submarine.turbidity_weights import (
+    _get_bed_following_water_weight_array,
+)
 
 
 def _submarine_bed_profile(
@@ -120,6 +123,23 @@ class SubmarineFanModel(DeltaModel):
         else:
             self.h_current = self.current_thickness
 
+        # stage-bookkeeping guard (spike SPIKE_DECISION.md, contract note 3):
+        #   the stock inlet bed BC (finalize_timestep) pins the inlet bed to
+        #   stage - h0 and the inlet depth to h0, and it is only inert when
+        #   the current thickness equals h0 (the v1 default). A different
+        #   thickness would drift the inlet bed by (h_current - h0) every
+        #   timestep, so it is warned against rather than silently allowed.
+        if self.h_current != self.h0:
+            _msg = (
+                "current_thickness different from h0 is not supported in "
+                "v1: the stock inlet bed boundary condition would drift the "
+                "inlet bed by (current_thickness - h0) each timestep. Got "
+                f"current_thickness={self.current_thickness}, "
+                f"h0={self.h0}."
+            )
+            self.log_warning(_msg)
+            warnings.warn(UserWarning(_msg))
+
         # the current inherits the inlet velocity scale of the riverine model
         self.u_current = self.u0
 
@@ -206,3 +226,58 @@ class SubmarineFanModel(DeltaModel):
             self.log_warning(_msg)
             warnings.warn(UserWarning(_msg))
             self.SLR = 0.0
+
+    def get_water_weight_array(self) -> None:
+        """Get bed-following step-direction weights for the density current.
+
+        Replaces the stock free-surface relaxation weighting with a
+        bed-gravity weighting: the slope term is computed from the bed
+        elevation ``eta`` (via the jitted
+        :obj:`~pyDeltaRCM.submarine.turbidity_weights._get_bed_following_water_weight_array`
+        kernel) instead of the ``stage`` field, blended against the unchanged
+        inertia term by :obj:`gamma_density` -- mirroring the stock
+        ``gamma``. Normalization and every zero-weight fallback are the
+        stock :obj:`pyDeltaRCM.water_tools._get_weight_at_cell_water` code.
+
+        The public :obj:`get_water_weight_array` method is the documented
+        reimplementation seam ("If you are trying to change water weighting
+        behavior, consider reimplementing this method",
+        ``water_tools.py``); it is dispatched through ``self`` from
+        :obj:`run_water_iteration`, so this override is live without any
+        upstream edit.
+        """
+        _msg = "Computing bed-following water weight array"
+        self.log_info(_msg, verbosity=2)
+
+        self.water_weights = _get_bed_following_water_weight_array(
+            self.depth,
+            self.eta,
+            self.mod_water_weight,
+            self.cell_type,
+            self.qx,
+            self.qy,
+            self.ivec_flat,
+            self.jvec_flat,
+            self.distances_flat,
+            self.dry_depth,
+            self.gamma_density,
+            self._theta_water,
+        )
+
+    def compute_free_surface(self) -> None:
+        """Track the current's surface; there is no free surface to relax.
+
+        A density current rides the bed at (approximately) constant
+        thickness, so its surface is ``eta + h_current`` by construction and
+        there is no free-surface field to smooth toward a sea level. The
+        stage field is simply recomputed from the evolving bed, which keeps
+        the stock depth bookkeeping (``depth = stage - eta``) equal to the
+        current thickness ``h_current`` everywhere.
+
+        Overriding this method also keeps the model off the fused native
+        water path: :obj:`pyDeltaRCM.native_water.can_use_native` falls back
+        to the Python reference path when a subclass overrides any of the
+        guarded water-routing methods, which is required for the
+        bed-following weighting above to run at all.
+        """
+        self.stage[:] = self.eta + self.h_current
