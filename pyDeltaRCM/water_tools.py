@@ -118,10 +118,9 @@ class water_tools(abc.ABC):
         _step = 0
 
         # flux from ghost node
-        start_inlets, start_counts = np.unique(start_indices, return_counts=True)
-        self.qxn.flat[start_inlets] += start_counts
-        self.qyn.flat[start_indices] += 0  # this could be omitted...
-        self.qwn.flat[start_indices] += self.Qp_water / self._dx / 2
+        _inject_inlet_discharge(
+            self.qxn, self.qyn, self.qwn, start_indices,
+            self.Qp_water, self._dx)
 
         # load the initial indices into the walk indices
         self.free_surf_walk_inds[:, _step] = start_indices
@@ -892,6 +891,23 @@ def _calculate_new_inds(current_inds: np.ndarray, new_direction, ravel_walk):
     return new_inds
 
 
+def _inject_inlet_discharge(
+    qxn: np.ndarray, qyn: np.ndarray, qwn: np.ndarray,
+    start_indices: np.ndarray, Qp_water: float, dx: float,
+) -> None:
+    """Inject the inlet discharge into the flux fields.
+
+    Each parcel carries ``Qp_water / dx / 2`` of discharge. Duplicate
+    start indices accumulate once per parcel, matching the per-parcel
+    ``qxn`` injection; augmenting assignment through fancy indexing with
+    the raw start indices would silently collapse the duplicates.
+    """
+    start_inlets, start_counts = np.unique(start_indices, return_counts=True)
+    qxn.flat[start_inlets] += start_counts
+    qyn.flat[start_indices] += 0  # no y-directed discharge at the inlet
+    qwn.flat[start_inlets] += start_counts * Qp_water / dx / 2
+
+
 @njit
 def _check_for_loops(
     free_surf_walk_inds: np.ndarray,
@@ -1003,6 +1019,11 @@ def _check_for_loops(
                     if Fw != 0:
                         px = px0 + int(np.round(Fx / Fw * 5.0))
                         py = py0 + int(np.round(Fy / Fw * 5.0))
+                    else:
+                        # degenerate transport vector (parcel looping exactly
+                        #   at the inlet center): leave in place rather than
+                        #   relying on the previous iteration's px, py
+                        px, py = px0, py0
 
                     # limit the new px and py to beyond the inlet, and
                     #   away from domain edges
