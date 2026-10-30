@@ -1,9 +1,12 @@
 # unit tests for shared_tools.py
 
+import os
+
 import pytest
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from pyDeltaRCM.model import DeltaModel
 from pyDeltaRCM import shared_tools
@@ -431,3 +434,63 @@ class TestCustomUnravelBounds:
         assert shared_tools.custom_unravel(0, (10, 20)) == (0, 0)
         assert shared_tools.custom_unravel(199, (10, 20)) == (9, 19)
         assert shared_tools.custom_unravel(5124, (100, 200)) == (25, 124)
+
+
+class TestTypeResolution:
+    """Tests for the allowlisted YAML "type" name resolver."""
+
+    def _load_default_yml(self):
+        """Load the packaged default.yml with the custom loader."""
+        _src_dir = os.path.realpath(os.path.dirname(shared_tools.__file__))
+        default_file = os.path.join(_src_dir, "default.yml")
+        with open(default_file, mode="r") as f:
+            return yaml.load(f, Loader=shared_tools.custom_yaml_loader())
+
+    def test_resolver_matches_previous_eval_default_yml(self) -> None:
+        """Resolver output matches the old eval approach for default.yml."""
+        default_dict = self._load_default_yml()
+        assert len(default_dict) > 0
+        for k, v in default_dict.items():
+            spec = v["type"]
+            if not type(spec) is list:
+                assert shared_tools.resolve_type_name(spec) == eval(spec)
+            else:
+                for _name in spec:
+                    assert shared_tools.resolve_type_name(_name) == eval(_name)
+
+    def test_resolver_matches_previous_eval_subclass_params(self) -> None:
+        """Resolver output matches the old eval approach for subclass specs."""
+        # the shapes actually defined by pyDeltaRCM subclass parameters in
+        # the package, test suite, and documentation (hook_import_files
+        # examples, SubmarineFanModel submarine parameters)
+        subclass_specs = [
+            "bool", "float", ["int", "float"], ["list"], ["str"], ["float"],
+            ["float", "int"],
+        ]
+        for spec in subclass_specs:
+            if not type(spec) is list:
+                exp = [eval(spec)]
+            else:
+                exp = [eval(_v) for _v in spec]
+            assert shared_tools.resolve_type_spec(spec) == exp
+
+    def test_resolver_rejects_arbitrary_code_payload(self) -> None:
+        """A code payload raises ValueError and is never executed."""
+        with pytest.raises(ValueError, match="Unknown or disallowed type name"):
+            shared_tools.resolve_type_name("__import__('os').system('true')")
+
+    def test_resolver_code_payload_has_no_side_effect(self) -> None:
+        """A code payload leaves no evidence of execution behind."""
+        marker = "PYDELTARCM_RESOLVER_EXPLOIT_MARKER"
+        payload = f"__import__('os').environ['{marker}'] = 'executed'"
+        with pytest.raises(ValueError, match="Unknown or disallowed type name"):
+            shared_tools.resolve_type_name(payload)
+        assert marker not in os.environ
+
+    def test_resolver_rejects_unknown_names_in_spec(self) -> None:
+        """Unknown names raise ValueError via the spec resolver too."""
+        for name in ("builtins", "numpy.ndarray", "", "os.system"):
+            with pytest.raises(ValueError, match="Unknown or disallowed type name"):
+                shared_tools.resolve_type_name(name)
+        with pytest.raises(ValueError, match="Unknown or disallowed type name"):
+            shared_tools.resolve_type_spec(["int", "__import__('os').system('id')"])

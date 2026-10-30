@@ -16,6 +16,77 @@ day_in_yr = 365.25
 earth_grav = 9.81
 
 
+# Allowlisted "type" names, mapping the strings that appear in the
+# packaged ``default.yml`` and in subclass ``subclass_parameters``
+# definitions to the objects the previous ``eval``-based resolution
+# returned. Supporting a new type name requires extending this table;
+# unknown names raise ``ValueError`` instead of being evaluated.
+_TYPE_NAME_ALLOWLIST = {
+    "int": int,
+    "float": float,
+    "str": str,
+    "bool": bool,
+    "list": list,
+    # ``eval('None')`` returned the ``None`` object, not the ``NoneType``
+    # class. The mapping is kept identical so that downstream type checks
+    # behave exactly as they did under the previous ``eval``-based code.
+    "None": None,
+}
+
+
+def resolve_type_name(name: str):
+    """Resolve a YAML "type" name to its allowlisted Python object.
+
+    Replaces the previous ``eval``-based resolution of the ``type`` fields
+    in ``default.yml`` and ``subclass_parameters`` definitions, which
+    would have executed arbitrary code for a maliciously crafted type
+    string.
+
+    Parameters
+    ----------
+    name : :obj:`str`
+        The type name as written in the YAML configuration, e.g.,
+        ``'int'``.
+
+    Returns
+    -------
+    The allowlisted object for that name (a Python type, or the ``None``
+    object for the name ``'None'``, matching the previous ``eval``
+    behavior).
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not in the allowlist.
+    """
+    try:
+        return _TYPE_NAME_ALLOWLIST[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown or disallowed type name: {name!r}. Allowed names: "
+            f"{sorted(_TYPE_NAME_ALLOWLIST)}."
+        ) from None
+
+
+def resolve_type_spec(spec):
+    """Resolve a YAML ``type`` field, a string or list of strings.
+
+    Parameters
+    ----------
+    spec : :obj:`str` or :obj:`list` of :obj:`str`
+        The ``type`` field value from ``default.yml`` or a
+        ``subclass_parameters`` entry.
+
+    Returns
+    -------
+    :obj:`list`
+        The resolved allowlisted objects, as a list.
+    """
+    if not type(spec) is list:
+        return [resolve_type_name(spec)]
+    return [resolve_type_name(_v) for _v in spec]
+
+
 @njit
 def set_random_seed(_seed: int) -> None:
     """Set the random seed from an integer.

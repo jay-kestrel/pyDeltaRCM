@@ -16,6 +16,7 @@ import abc
 
 from pyDeltaRCM.shared_tools import (
     custom_yaml_loader,
+    resolve_type_spec,
     set_random_seed,
     set_random_state,
     unpack_rng_state,
@@ -104,10 +105,7 @@ class init_tools(abc.ABC):
         default_dict = yaml.load(default_file, Loader=loader)
         default_file.close()
         for k, v in default_dict.items():
-            if not type(v["type"]) is list:
-                default_dict[k]["type"] = [eval(v["type"])]
-            else:
-                default_dict[k]["type"] = [eval(_v) for _v in v["type"]]
+            default_dict[k]["type"] = resolve_type_spec(v["type"])
 
         # only access the user input file if provided.
         if self.input_file:
@@ -285,10 +283,7 @@ class init_tools(abc.ABC):
                 raise ValueError(_msg)
             elif k in self._user_dict:
                 # get expected types
-                if not type(v["type"]) is list:
-                    expected_type = [eval(v["type"])]
-                else:
-                    expected_type = [eval(_v) for _v in v["type"]]
+                expected_type = resolve_type_spec(v["type"])
                 # evaluate against expected types
                 if type(self._user_dict[k]) in expected_type:
                     input_file_vars[k] = self._user_dict[k]
