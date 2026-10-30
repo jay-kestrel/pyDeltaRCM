@@ -9,6 +9,12 @@ from pyDeltaRCM import DeltaModel
 
 
 class TestConsistentOutputsBetweenMerges:
+    @pytest.fixture(autouse=True)
+    def reference_rng_goldens(self, monkeypatch):
+        # These historical trajectories pin the NumPy/Numba stream, not the
+        # distributional contract of the independent native RNG.
+        monkeypatch.setenv("PYDELTARCM_NATIVE", "0")
+
     def test_bed_after_one_update(self, tmp_path: Path) -> None:
         file_name = "user_parameters.yaml"
         p, f = utilities.create_temporary_file(tmp_path, file_name)

@@ -55,3 +55,33 @@ from, the RNG seed, and the grid configuration.
 
 Port PRs must report before/after numbers from this harness against a
 recorded baseline (see the port spec); no speedup claim exists without one.
+
+## Comparing the water backends
+
+Build the extension first (`python -m pip install -e .`, with Rust installed).
+Run the same harness sequentially on an otherwise idle machine:
+
+```shell
+PYDELTARCM_NATIVE=0 python benchmarks/benchmark_timestep.py \
+    --scenarios early_water --output-dir benchmarks/results/reference
+PYDELTARCM_NATIVE=1 python benchmarks/benchmark_timestep.py \
+    --scenarios early_water --output-dir benchmarks/results/native
+```
+
+On PowerShell, set `$env:PYDELTARCM_NATIVE = '0'` or `'1'` before the respective
+command. The harness records the selected `water_backend` alongside the grid
+configuration; verify it is `python` and `rust`, respectively. Compare the
+reference mean divided by the native mean. Do not include compilation or
+warm-up time, or compare runs with different parcel counts. The water-port
+gate is a ratio of at least 2 on `early_water`; it is not a promise about the
+sediment-dominated scenario.
+
+Native and reference RNG streams differ deliberately. Their scientific
+comparison lives in `tests/integration/test_native_water_statistics.py`:
+three seed families, five independently derived seeds each, eight updates
+per run and backend. The entire paired 90% confidence interval must fit
+within the fixed relative margins: 15% for bed relief and deposition per
+update, 10% for channel-mouth discharge. This is a finite ensemble test, not
+proof of equivalence for every model configuration. Three additional seeded
+native repeat tests require bit-identical fields. Run with `pytest -s` to
+print seeds, per-run metrics, intervals, and margins.

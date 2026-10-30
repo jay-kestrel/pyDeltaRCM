@@ -39,11 +39,16 @@ class water_tools(abc.ABC):
 
             # run the actual iteration of the parcels
             self.hook_run_water_iteration()
-            self.run_water_iteration()
+            from pyDeltaRCM.native_water import can_use_native, run_water_phase
 
-            # accumulate the routed water parcels into free surface
-            self.hook_compute_free_surface()
-            self.compute_free_surface()
+            if can_use_native(self):
+                run_water_phase(self)
+            else:
+                self.run_water_iteration()
+
+                # accumulate the routed water parcels into free surface
+                self.hook_compute_free_surface()
+                self.compute_free_surface()
 
             # clean up the water surface and apply boundary conditions
             self.hook_finalize_water_iteration(iteration)
