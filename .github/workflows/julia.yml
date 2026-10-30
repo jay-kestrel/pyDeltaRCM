@@ -1,0 +1,37 @@
+name: julia
+
+on:
+  push:
+    branches: [develop]
+    paths: ["julia/**", ".github/workflows/julia.yml"]
+  pull_request:
+    branches: [develop]
+    paths: ["julia/**", ".github/workflows/julia.yml"]
+
+# Org policy: no external GitHub Actions (no `uses:` steps). Check out the
+# repo and install Julia from the official tarball in-script.
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        run: |
+          REPO_URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          git clone --quiet "$REPO_URL" .
+          git fetch --quiet --depth 1 origin "$SHA"
+          git checkout --quiet --detach "$SHA"
+
+      - name: Install Julia 1.11.7 from tarball
+        run: |
+          curl -fsSL -o /tmp/julia.tar.gz \
+            https://julialang-s3.julialang.org/bin/linux/x64/1.11/julia-1.11.7-linux-x86_64.tar.gz
+          mkdir -p /opt/julia
+          tar -xzf /tmp/julia.tar.gz -C /opt/julia --strip-components=1
+          /opt/julia/bin/julia --version
+
+      - name: Run the equivalence suite
+        run: |
+          cd julia
+          /opt/julia/bin/julia --project=. --check-bounds=yes test/runtests.jl

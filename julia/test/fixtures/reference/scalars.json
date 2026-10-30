@@ -1,0 +1,20 @@
+{
+  "fixture": "fixture_default_small",
+  "reference_git_sha": "94bbda870e9c5bbfb08491ec14fb56ae967a4044",
+  "python_version": "3.13.14",
+  "numpy_version": "2.3.5",
+  "numba_version": "0.66.0",
+  "rng_name": "MT19937",
+  "rng_key_length": 624,
+  "native_phase": false,
+  "updates": [
+    {
+      "time_iter": 0,
+      "walk_columns": 20
+    },
+    {
+      "time_iter": 1,
+      "walk_columns": 20
+    }
+  ]
+}
