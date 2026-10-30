@@ -1,0 +1,19 @@
+[package]
+name = "pydeltarcm-native"
+version = "2.3.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib", "rlib"]
+path = "rust/lib.rs"
+
+[dependencies]
+pyo3 = { version = "0.27", features = ["abi3-py311"] }
+numpy = "0.27"
+rand = "0.9"
+rand_xoshiro = "0.7"
+
+[features]
+extension-module = ["pyo3/extension-module"]
