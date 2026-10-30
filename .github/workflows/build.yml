@@ -12,6 +12,11 @@ jobs:
 
   test:
     runs-on: ${{ matrix.os }}
+    env:
+      # pin the non-interactive backend: runner toolcache updates can leave
+      # tkinter broken (TclError: Can't find a usable init.tcl) and make
+      # backend selection nondeterministic on windows
+      MPLBACKEND: Agg
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +52,7 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       PYTHON: '3.13'
+      MPLBACKEND: Agg
     steps:
     - name: Checkout code
       uses: actions/checkout@v7
