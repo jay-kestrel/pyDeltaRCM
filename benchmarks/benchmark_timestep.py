@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import statistics
 import subprocess
@@ -74,6 +75,23 @@ SCENARIOS = ("early_water", "evolved_sediment")
 # the regime this scenario must stress.
 SCENARIO_CONFIG_OVERRIDES = {
     "evolved_sediment": {"Np_sed": 4000},
+}
+
+# Kernel-level benchmark (the COBOL port target): the batched weighted
+# parcel pick. Random numbers are supplied by Python (C5); each backend
+# consumes identical pre-drawn uniforms, so rows differ only by the
+# arithmetic under test. Timing rows are feasibility measurements, never
+# gates (port contract).
+KERNEL_PICK_DESCRIPTION = (
+    "batched weighted parcel pick (shared_tools.random_pick): float32 "
+    "cumulative weights + searchsorted-left scan; rows x 9 weights "
+    "(D8 window), one pre-drawn uniform(0, row_total) double per row"
+)
+KERNEL_PICK_WORKLOAD = {
+    "cols": 9,
+    "dtype": "float32",
+    "seed": 0,
+    "uniforms": "pre-drawn float64 uniform(0, row_total) (C5)",
 }
 
 
@@ -159,6 +177,103 @@ def summarize_timing(times: list[float]) -> dict:
         "max_s": max(times),
         "total_s": sum(times),
         "per_update_times_s": times,
+    }
+
+
+def time_pick_backend(rows: np.ndarray, uniforms: np.ndarray, repeats: int) -> list[float]:
+    """Time full-batch ``pick_rows`` calls through the real dispatch."""
+    from pyDeltaRCM import cobol_tools
+
+    times = []
+    for _ in range(repeats):
+        t0 = time.perf_counter()
+        cobol_tools.pick_rows(rows, uniforms=uniforms)
+        times.append(time.perf_counter() - t0)
+    return times
+
+
+def summarize_picks(times: list[float], k: int) -> dict:
+    """Per-pick statistics from full-batch pick timings."""
+    mean_batch = statistics.fmean(times)
+    return {
+        "picks_per_batch": k,
+        "batches": len(times),
+        "mean_us_per_pick": 1e6 * mean_batch / k,
+        "median_us_per_pick": 1e6 * statistics.median(times) / k,
+        "picks_per_s": k / mean_batch,
+    }
+
+
+def run_kernel_pick_bench(smoke: bool) -> dict:
+    """Time the ported pick routine per backend with backend-tagged rows.
+
+    Asserts exact pick parity between the backends on the workload before
+    any timing counts -- a parity failure aborts the harness (integer
+    indices must match; there is no tolerance to document). The COBOL row
+    is emitted with ``available: false`` when the shared object was not
+    requested and is not built; a requested-but-missing build raises.
+    """
+    from pyDeltaRCM import cobol_tools
+
+    k = 200 if smoke else 4000
+    repeats = 5 if smoke else 40
+    rng = np.random.default_rng(KERNEL_PICK_WORKLOAD["seed"])
+    rows = np.ascontiguousarray(rng.random((k, 9)), dtype=np.float32)
+    cum = np.cumsum(rows, axis=1)
+    uniforms = np.array(
+        [rng.uniform(0, cum[p, -1]) for p in range(k)], dtype=np.float64
+    )
+
+    requested = cobol_tools.cobol_active()
+    env_backup = os.environ.get("PYDELTARCM_COBOL")
+    try:
+        os.environ["PYDELTARCM_COBOL"] = "0"
+        py_picks = cobol_tools.pick_rows(rows, uniforms=uniforms)
+        py_times = time_pick_backend(rows, uniforms, repeats)
+
+        os.environ["PYDELTARCM_COBOL"] = "1"
+        try:
+            cobol_picks = cobol_tools.pick_rows(rows, uniforms=uniforms)
+        except FileNotFoundError:
+            if requested:
+                raise
+            cobol_row = {
+                "available": False,
+                "reason": "not built: run `make -C cobol` (requires GnuCOBOL 3.x)",
+            }
+        else:
+            if not np.array_equal(py_picks, cobol_picks):
+                raise SystemExit(
+                    "COBOL pick parity failure on the benchmark workload: "
+                    "indices must match exactly (no tolerance applies)"
+                )
+            cobol_times = time_pick_backend(rows, uniforms, repeats)
+            cobol_row = {
+                "available": True,
+                "implementation": "cobol",
+                "gnucobol_version": cobol_tools.gnucobol_version(),
+                "single_threaded": True,
+                **summarize_picks(cobol_times, k),
+            }
+    finally:
+        if env_backup is None:
+            os.environ.pop("PYDELTARCM_COBOL", None)
+        else:
+            os.environ["PYDELTARCM_COBOL"] = env_backup
+
+    py_row = {
+        "available": True,
+        "implementation": "numpy",
+        "note": (
+            "numpy reference formulation of the pick; the in-loop "
+            "shared_tools.random_pick runtime function is numba-compiled"
+        ),
+        **summarize_picks(py_times, k),
+    }
+    return {
+        "description": KERNEL_PICK_DESCRIPTION,
+        "workload": {"rows": k, "repeats": repeats, **KERNEL_PICK_WORKLOAD},
+        "backends": {"python": py_row, "cobol": cobol_row},
     }
 
 
@@ -333,6 +448,36 @@ def format_markdown(results: dict) -> str:
             f"| warm-up | {warmup['type']}, {warmup['updates']} updates"
             f"{warmup_detail} |",
         ]
+    kernels = results.get("kernels", {})
+    if kernels:
+        pick = kernels["random_pick"]
+        lines += [
+            "",
+            "## Kernel: random_pick (batched weighted pick)",
+            "",
+            pick["description"],
+            "",
+            "Timing rows are feasibility measurements, not gates. "
+            "COBOL kernels are single-threaded; parity is asserted "
+            "exactly before timings count.",
+            "",
+            "| backend | mean µs/pick | median µs/pick | picks/s | implementation |",
+            "| --- | --- | --- | --- | --- |",
+        ]
+        for backend_name, row in pick["backends"].items():
+            if not row["available"]:
+                lines.append(
+                    f"| {backend_name} | not built | | | {row['reason']} |"
+                )
+            else:
+                impl = row["implementation"]
+                if "gnucobol_version" in row:
+                    impl += f" (GnuCOBOL {row['gnucobol_version']})"
+                lines.append(
+                    f"| {backend_name} | {row['mean_us_per_pick']:.4f} "
+                    f"| {row['median_us_per_pick']:.4f} "
+                    f"| {row['picks_per_s']:.0f} | {impl} |"
+                )
     return "\n".join(lines) + "\n"
 
 
@@ -430,6 +575,10 @@ def main(argv: list[str] | None = None) -> int:
             morphology_threshold=knobs["morphology_threshold"],
             max_warmup_updates=knobs["max_warmup_updates"],
         )
+
+    print("[random_pick] timing the ported pick kernel per backend...",
+          file=sys.stderr, flush=True)
+    results["kernels"] = {"random_pick": run_kernel_pick_bench(smoke=args.smoke)}
 
     markdown = format_markdown(results)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
