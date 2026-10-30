@@ -6,7 +6,42 @@ and two-fraction sediment machinery to route turbidity currents and build
 submarine-fan-like deposits on a submerged slope-to-basin domain.
 """
 
+import warnings
+
+import numpy as np
+
 from pyDeltaRCM.model import DeltaModel
+
+
+def _submarine_bed_profile(
+    n_rows: int, dx: float, slope_gradient: float, relief: float
+) -> np.ndarray:
+    """Initial submarine bed cross-section, laterally uniform.
+
+    The bed starts at the canyon head (0 m at row 0), descends downdip
+    (increasing row) at ``slope_gradient``, and stays flat at the basin
+    floor (``-relief``) once the total relief is exhausted. A domain
+    shorter than ``relief / (slope_gradient * dx)`` cells never reaches
+    the floor and is a planar slope throughout.
+
+    Parameters
+    ----------
+    n_rows : int
+        Number of domain rows (domain length in cells).
+    dx : float
+        Cell size, in meters.
+    slope_gradient : float
+        Bed gradient of the canyon-to-slope section.
+    relief : float
+        Vertical relief from the canyon head to the basin floor, in meters.
+
+    Returns
+    -------
+    np.ndarray
+        Bed elevations along the flow direction, shape ``(n_rows,)``.
+    """
+    drop = np.arange(n_rows) * dx * slope_gradient
+    return -np.minimum(drop, relief)
 
 
 class SubmarineFanModel(DeltaModel):
@@ -94,3 +129,80 @@ class SubmarineFanModel(DeltaModel):
             self.coeff_gamma_density * self.g * self.slope_gradient * self.dx
             / self.u_current**2
         )
+
+    def hook_after_create_domain(self) -> None:
+        """Replace the riverine domain with a submerged slope-to-basin one.
+
+        The stock ``create_domain`` builds a planar delta topset with a
+        channel discharging into a flat, uniform-depth basin. This hook
+        replaces that bathymetry with a fully submerged
+        canyon-head-to-basin-floor profile, so a density current released
+        at the inlet has a bed to run down:
+
+        - the bed descends downdip from the canyon head (row 0, at the
+          inlet) at ``slope_gradient`` and flattens at the basin floor,
+          ``hb`` below the head (the stock basin-depth parameter, resolved
+          by ``create_domain`` as ``hb or h0``);
+        - every cell is wet: former land cells (stock ``cell_type == -2``)
+          become ocean, so the domain has no shoreline; the stock elliptical
+          edge mask (``cell_type == -1``) is kept as the outflow boundary
+          and the inlet channel cells (``cell_type == 1``) are untouched;
+        - the flow fields describe the density current, which starts at
+          rest: ``stage`` trails the bed at the constant current thickness
+          ``h_current``, ``depth`` is that thickness everywhere, and the
+          discharge and velocity fields start at zero;
+        - sea level is pinned to the basin floor, strictly below the
+          current's surface everywhere, so the stock stage floor
+          (``stage = max(stage, H_SL)``) never modifies the current's stage
+          field; v1 does not simulate the ambient sea or its rise, so a
+          nonzero ``SLR`` is zeroed with a warning.
+        """
+        # total relief from the canyon head to the basin floor; _hb is
+        #   resolved by create_domain as "hb or h0"
+        relief = float(self._hb)
+
+        # laterally uniform canyon-head-to-basin-floor bed
+        self.eta[:] = _submarine_bed_profile(
+            self.L, self.dx, self.slope_gradient, relief
+        )[:, np.newaxis]
+        self.stage[:] = self.eta + self.h_current
+        self.depth[:] = self.h_current
+
+        # fully submerged: former land cells become ocean; the stock
+        #   elliptical edge mask (-1) stays as the outflow boundary
+        self.cell_type[self.cell_type == -2] = 0
+
+        # the flow fields describe the current, which starts at rest
+        self.qx[:] = 0
+        self.qy[:] = 0
+        self.qw[:] = 0
+        self.ux[:] = 0
+        self.uy[:] = 0
+        self.uw[:] = 0
+
+        # refresh the bed trackers to the submarine initial condition
+        self.eta0[:] = self.eta
+        self.eta_init[:] = self.eta
+
+        # v1 sea-level bookkeeping: the ambient sea is not simulated, so the
+        #   sea level is pinned at the basin floor -- strictly below the
+        #   current's surface everywhere (the current's depth h_current > 0),
+        #   which keeps the stock stage floor max(stage, H_SL) from ever
+        #   modifying the current's stage field (spike-verified invariant).
+        #   Note: "kept above the whole domain" is geometrically incompatible
+        #   with that invariant -- above-sea-level flooring would flatten the
+        #   current's stage field onto H_SL.
+        self.H_SL = -relief
+
+        # v1 does not simulate sea-level rise; a rising H_SL could eventually
+        #   reach the current's surface and bind the stage floor, flattening
+        #   the current, so it is zeroed.
+        if self.SLR != 0.0:
+            _msg = (
+                "SLR is not simulated by the SubmarineFanModel in v1; the "
+                f"configured rate ({self.SLR} m/s) is ignored and SLR is "
+                "set to 0."
+            )
+            self.log_warning(_msg)
+            warnings.warn(UserWarning(_msg))
+            self.SLR = 0.0
