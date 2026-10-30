@@ -1,0 +1,21 @@
+# Configuration for the checkpoint/resume continuity example
+# (checkpoint_resume_continuity.py).
+#
+# Domain and run length are chosen for documentation-build speed, not for
+# geomorphic realism. The derived model timestep for this configuration is
+# dt = 25000 s, so checkpoint_dt = 50000 saves a checkpoint every two model
+# updates. Note that the first update always writes a checkpoint: the
+# checkpoint counter starts at infinity by design ("force save on t==0").
+#
+# The driver script writes per-run copies of this file that add `out_dir`
+# (the output directory has to be set in the YAML itself --- see the
+# example's documentation for why it cannot be passed as a keyword).
+Length: 1500          # domain length, m
+Width: 3000           # domain width, m
+dx: 50                # grid cell size, m
+Np_water: 500         # number of water parcels
+Np_sed: 500           # number of sediment parcels
+seed: 42              # fixed seed for the numba random number generator
+save_checkpoint: true
+checkpoint_dt: 50000  # model seconds between checkpoint saves (= 2 updates here)
+save_dt: 50000        # kept equal to checkpoint_dt; grid/data saving is off

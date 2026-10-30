@@ -12,6 +12,7 @@ Running the model
    resume_from_checkpoint
    verify_mass_conservation
    seeded_reproducibility
+   checkpoint_resume_continuity
 
 Common "gotchas"
 ----------------
