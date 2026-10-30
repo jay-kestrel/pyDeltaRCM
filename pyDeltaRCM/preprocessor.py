@@ -603,9 +603,8 @@ class BasePreprocessor(abc.ABC):
             q = multiprocessing.Queue()
 
             # loop and create and start all jobs
+            num_failed_jobs = 0
             for i in range(0, num_total_processes):
-                s.acquire()  # aquire resource from Semaphore
-
                 # open yaml file for specific job
                 job_yaml = self._open_yaml(self.file_list[i])
 
@@ -615,15 +614,28 @@ class BasePreprocessor(abc.ABC):
                 job_config = self.config_list[i].copy()
                 job_config.update(job_yaml)
 
-                # instantiate the job
-                p = _ParallelJob(
-                    i=i,
-                    queue=q,
-                    sema=s,
-                    input_file=self.file_list[i],
-                    config_dict=job_config,
-                    DeltaModel=DeltaModel,
-                )
+                try:
+                    # instantiate the job BEFORE acquiring the semaphore:
+                    #   the constructor builds the DeltaModel, and a failure
+                    #   there must not leak an acquired semaphore unit
+                    p = _ParallelJob(
+                        i=i,
+                        queue=q,
+                        sema=s,
+                        input_file=self.file_list[i],
+                        config_dict=job_config,
+                        DeltaModel=DeltaModel,
+                    )
+                except Exception:
+                    _msg = (
+                        "job: %d, stage: 0, code: 1, msg: "
+                        "job failed to build model" % i
+                    )
+                    print(_msg)
+                    num_failed_jobs += 1
+                    continue
+
+                s.acquire()  # aquire resource from Semaphore
                 self._job_list.append(p)
                 p.start()
 
@@ -636,6 +648,7 @@ class BasePreprocessor(abc.ABC):
             while not q.empty():
                 gotq = q.get()
                 if gotq["code"] == 1:
+                    num_failed_jobs += 1
                     print("Job {job} ended in error:\n {msg}".format_map(gotq))
                 else:
                     print(
@@ -643,9 +656,18 @@ class BasePreprocessor(abc.ABC):
                         "for stage {stage}.".format_map(gotq)
                     )
 
+            # surface job failures: batch drivers rely on the preprocessor
+            #   raising instead of silently completing with failed jobs
+            if num_failed_jobs > 0:
+                raise RuntimeError(
+                    "%d job(s) ended in error; see messages above."
+                    % num_failed_jobs
+                )
+
         # if the parallel flag is False (default)
         elif _parallel_flag is False:
             # loop and create all jobs
+            num_failed_jobs = 0
             for i in range(0, num_total_processes):
                 # open yaml file for specific job
                 job_yaml = self._open_yaml(self.file_list[i])
@@ -656,12 +678,22 @@ class BasePreprocessor(abc.ABC):
                 job_config = self.config_list[i].copy()
                 job_config.update(job_yaml)
 
-                p = _SerialJob(
-                    i=i,
-                    input_file=self.file_list[i],
-                    config_dict=job_config,
-                    DeltaModel=DeltaModel,
-                )
+                try:
+                    p = _SerialJob(
+                        i=i,
+                        input_file=self.file_list[i],
+                        config_dict=job_config,
+                        DeltaModel=DeltaModel,
+                    )
+                except Exception:
+                    _msg = (
+                        "job: %d, stage: 0, code: 1, msg: "
+                        "job failed to build model" % i
+                    )
+                    print(_msg)
+                    num_failed_jobs += 1
+                    continue
+
                 self._job_list.append(p)
 
             # run the job(s)
@@ -669,6 +701,21 @@ class BasePreprocessor(abc.ABC):
                 if self.verbose > 0:
                     print("Starting job %s" % str(i))
                 job.run()
+
+            # surface job failures: batch drivers rely on the preprocessor
+            #   raising instead of silently completing with failed jobs
+            #   (only an explicitly-True flag counts, so mocked jobs in
+            #   tests do not register as failures)
+            num_failed_jobs += sum(
+                1
+                for job in self._job_list
+                if getattr(job, "failed", False) is True
+            )
+            if num_failed_jobs > 0:
+                raise RuntimeError(
+                    "%d job(s) ended in error; see log messages above."
+                    % num_failed_jobs
+                )
 
         # if the parallel flag is a junk value
         else:
@@ -812,6 +859,10 @@ class _SerialJob(_BaseJob):
     .. note:: You probably don't need to interact with this class directly.
     """
 
+    # set to True by run() when the job fails, so the batch can report
+    #   the failure instead of silently completing
+    failed = False
+
     def __init__(self, i, input_file, config_dict, DeltaModel=None) -> None:
         """Initialize a serial job.
 
@@ -851,7 +902,7 @@ class _SerialJob(_BaseJob):
                 self._final_timestep(_rem)
 
         # if the model run fails
-        except (RuntimeError, ValueError) as e:
+        except Exception as e:
             _msg = ", ".join(
                 [
                     "job: " + str(self.i),
@@ -862,6 +913,7 @@ class _SerialJob(_BaseJob):
             )
             self.deltamodel.logger.error(_msg)
             self.deltamodel.logger.exception(e)
+            self.failed = True
 
         # if the model run succeeds
         else:
@@ -873,7 +925,7 @@ class _SerialJob(_BaseJob):
             self.deltamodel.finalize()
 
         # if the model finalization fails
-        except (RuntimeError, ValueError) as e:
+        except Exception as e:
             _msg = ", ".join(
                 [
                     "job: " + str(self.i),
@@ -884,6 +936,7 @@ class _SerialJob(_BaseJob):
             )
             self.deltamodel.logger.error(_msg)
             self.deltamodel.logger.exception(e)
+            self.failed = True
 
         # if the finalization succeeds
         else:
