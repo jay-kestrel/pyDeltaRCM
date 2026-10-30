@@ -428,6 +428,9 @@ class TestLoadCheckpoint:
         assert _delta._save_time_since_data == int(
             checkpoint.pop("save_time_since_data")
         )
+        assert _delta._save_time_since_checkpoint == float(
+            checkpoint.pop("save_time_since_checkpoint")
+        )
 
         # load grids
         assert np.all(_delta.eta == checkpoint.pop("eta"))

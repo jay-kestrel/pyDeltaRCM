@@ -555,6 +555,98 @@ class TestCheckpointingIntegrations:
         assert np.all(resume_job.deltamodel.depth == long_job.deltamodel.depth)
         assert np.all(resume_job.deltamodel.stage == long_job.deltamodel.stage)
 
+    def test_resume_checkpoint_cadence_continues(self, tmp_path: Path) -> None:
+        """Test that a resumed run's checkpoint cadence continues on schedule.
+
+        The checkpoint counter (``_save_time_since_checkpoint``) must be
+        saved with the checkpoint and restored on resume, so that the
+        resumed run's checkpoint stream matches the uninterrupted run.
+        Otherwise the counter keeps its initial value of infinity and the
+        first update after resume spuriously overwrites the checkpoint
+        file, regardless of the ``checkpoint_dt`` phase.
+        """
+        # base run with a checkpoint interval that does not match save_dt
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"save_checkpoint": True}
+        )
+        baseModel = DeltaModel(input_file=p)
+
+        # modify the checkpoint dt to be different than save_dt, so
+        #   checkpoints trigger mid-cycle
+        baseModel._checkpoint_dt = baseModel.save_dt * 0.65
+
+        # run for some number of updates, saving checkpoints as triggered
+        with pytest.warns(
+            UserWarning, match=r"Grid save interval and checkpoint interval"
+        ):
+            for _ in range(0, 50):
+                baseModel.update()
+        baseModel.finalize()
+
+        # the last checkpoint was saved mid-run
+        ckp_file = os.path.join(baseModel.prefix, "checkpoint.npz")
+        with np.load(ckp_file) as z:
+            ckp_time = float(z["time"])
+        assert 0 < ckp_time < baseModel.time
+
+        # resume from the checkpoint
+        p_resume = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"resume_checkpoint": True}
+        )
+        resumeModel = DeltaModel(input_file=p_resume)
+
+        # the restored counter is the uninterrupted run's post-save value
+        #   (the counter is reset when the checkpoint is saved), not
+        #   infinity
+        assert resumeModel._save_time_since_checkpoint == 0.0
+
+        # advance one step: the checkpoint must not be overwritten,
+        #   because the resumed cadence continues on the uninterrupted
+        #   schedule
+        resumeModel.update()
+        with np.load(ckp_file) as z:
+            assert float(z["time"]) == ckp_time
+        resumeModel.finalize()
+
+    def test_resume_preserves_fractional_data_cadence(self, tmp_path: Path) -> None:
+        """Test that the data output cadence accumulator survives resume.
+
+        ``_save_time_since_data`` accumulates fractional timesteps, so it
+        must be restored as a float. Restoring it through ``int()``
+        truncation shifts the output cadence of the resumed run relative
+        to the uninterrupted run.
+        """
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"save_checkpoint": True}
+        )
+        baseModel = DeltaModel(input_file=p)
+
+        # advance the model with a non-integer timestep, so the data
+        #   output accumulator is fractional at checkpoint time
+        baseModel._dt = 250.5
+        for _ in range(0, 3):
+            baseModel.update()
+
+        # force a checkpoint save
+        baseModel._save_time_since_checkpoint = float("inf")
+        baseModel.output_checkpoint()
+        baseModel.finalize()
+
+        # the accumulator value saved to the checkpoint is fractional
+        expected = 3 * 250.5
+        with np.load(os.path.join(baseModel.prefix, "checkpoint.npz")) as z:
+            assert float(z["save_time_since_data"]) == expected
+
+        # resume from the checkpoint
+        p_resume = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"resume_checkpoint": True}
+        )
+        resumeModel = DeltaModel(input_file=p_resume)
+
+        # the float accumulator must survive the round trip without
+        #   truncation
+        assert resumeModel._save_time_since_data == expected
+
 
 class TestCheckpointingCreatingLoading:
     def test_load_checkpoint_with_netcdf(self, tmp_path: Path) -> None:
@@ -881,3 +973,35 @@ class TestCheckpointingCreatingLoading:
         # raises a permissions error on Windows
         with pytest.raises(PermissionError):
             _ = DeltaModel(input_file=p)
+
+    def test_checkpoint_counter_round_trip(self, tmp_path: Path) -> None:
+        """Test that the checkpoint counter survives a save-load round trip.
+
+        ``save_the_checkpoint`` must record ``_save_time_since_checkpoint``
+        and ``load_checkpoint`` must restore it exactly, so a resumed run
+        continues the checkpoint cadence of the uninterrupted run.
+        """
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"save_checkpoint": True}
+        )
+        _delta = DeltaModel(input_file=p)
+
+        # set the counter to a distinctive value and save the checkpoint
+        _delta._save_time_since_checkpoint = 1234.5
+        _delta.save_the_checkpoint()
+        _delta.finalize()
+
+        # the counter is in the saved checkpoint file
+        with np.load(os.path.join(_delta.prefix, "checkpoint.npz")) as z:
+            assert float(z["save_time_since_checkpoint"]) == 1234.5
+
+        # resume from the checkpoint
+        p_resume = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"save_checkpoint": True, "resume_checkpoint": True},
+        )
+        _resume = DeltaModel(input_file=p_resume)
+
+        # the counter survives the save-load round trip exactly
+        assert _resume._save_time_since_checkpoint == 1234.5

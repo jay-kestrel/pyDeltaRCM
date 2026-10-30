@@ -1100,7 +1100,16 @@ class init_tools(abc.ABC):
         self.H_SL = float(checkpoint["H_SL"])
         self._time_iter = int(checkpoint["time_iter"])
         self._save_iter = int(checkpoint["save_iter"])
-        self._save_time_since_data = int(checkpoint["save_time_since_data"])
+        self._save_time_since_data = float(checkpoint["save_time_since_data"])
+        if "save_time_since_checkpoint" in checkpoint.files:
+            self._save_time_since_checkpoint = float(
+                checkpoint["save_time_since_checkpoint"]
+            )
+        else:
+            # checkpoints written before this counter was recorded were
+            # always saved at a checkpoint trigger, so the correct
+            # continuation value is 0
+            self._save_time_since_checkpoint = float(0)
 
         # load grids
         self.eta = checkpoint["eta"]
