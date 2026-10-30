@@ -11,6 +11,7 @@ Running the model
    basic_runs
    resume_from_checkpoint
    verify_mass_conservation
+   seeded_reproducibility
 
 Common "gotchas"
 ----------------
