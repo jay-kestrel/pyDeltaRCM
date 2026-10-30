@@ -87,8 +87,32 @@ def test_forced_walks_and_flux_are_exact(model, monkeypatch, direction, loop):
     monkeypatch.setattr(model, "get_water_weight_array", lambda: None)
     result = _native.water_phase(*native_water.phase_inputs(model), 101)
     model.run_water_iteration()
-    for name in ("qxn", "qyn", "qwn", "free_surf_walk_inds", "free_surf_flag"):
-        np.testing.assert_array_equal(result[name], getattr(model, name), err_msg=name)
+    # Paths never depend on flux rounding (one-hot weights, no feedback),
+    # so they are bit-compared in both numba modes. The flux fields are
+    # bit-compared under JIT; the no-JIT numpy fallback casts each flux
+    # operand to f32 before adding, while numba (and the Rust port)
+    # accumulate in f64 and cast on store -- per-parcel chains of a few
+    # deposits diverge by 1 ulp (3 parcels from one inlet: 0.449999958 vs
+    # 0.449999988), the same relaxed comparison the surface-kernel test
+    # uses below.
+    np.testing.assert_array_equal(
+        result["free_surf_walk_inds"], model.free_surf_walk_inds,
+        err_msg="free_surf_walk_inds",
+    )
+    np.testing.assert_array_equal(
+        result["free_surf_flag"], model.free_surf_flag, err_msg="free_surf_flag"
+    )
+    flux_fields = ("qxn", "qyn", "qwn")
+    if numba_config.DISABLE_JIT:
+        for name in flux_fields:
+            np.testing.assert_allclose(
+                result[name], getattr(model, name), rtol=1e-6, atol=0, err_msg=name
+            )
+    else:
+        for name in flux_fields:
+            np.testing.assert_array_equal(
+                result[name], getattr(model, name), err_msg=name
+            )
 
 
 @pytest.mark.parametrize("count", [1, 2, 20])
