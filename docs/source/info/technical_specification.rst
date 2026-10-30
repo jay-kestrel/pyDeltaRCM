@@ -205,7 +205,7 @@ The model timestep
 
 The timestep :math:`\Delta t` balances computation efficiency against
 model stability, scaled by the reference volume of an inlet-channel cell
-(:ref:`reference-volume` in :doc:`initialization`) and the sediment
+(:doc:`initialization`) and the sediment
 inflow:
 
 .. math::
