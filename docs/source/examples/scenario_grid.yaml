@@ -1,0 +1,37 @@
+# Scenario-grid configuration for the Preprocessor matrix expansion.
+#
+# The "matrix" key is expanded by the Preprocessor into one job per
+# combination (itertools.product), for 2 x 2 x 2 = 8 jobs here. Each job
+# receives the fixed configuration below, with its own values for the three
+# matrix axes, and runs in its own subfolder of "out_dir".
+#
+# Values are chosen to keep the docs-build fast, not for geomorphic realism:
+# the domain is small (2000 x 3000 m at dx = 50), only 10 updates are run,
+# and sea level / subsidence rates are exaggerated or stunted relative to
+# natural rates. See scenario_grid.rst for details.
+#
+# Note: when running this file through the command line interface, the
+# output directory must not already exist. scenario_grid.py sidesteps this
+# by redirecting "out_dir" to a temporary directory.
+
+out_dir: output
+timesteps: 10
+seed: 42
+
+# subsidence: the toggle is fixed on for all jobs, so the subsidence axis
+# of the matrix is the rate itself (0.0 = off). "start_subsidence: 0.0"
+# makes subsidence active from the first update; the default (216000 s)
+# would never be reached in a 10-update run.
+toggle_subsidence: true
+start_subsidence: 0.0
+
+# small, fast domain
+Length: 2000.0
+Width: 3000.0
+Np_water: 1000
+Np_sed: 1000
+
+matrix:
+  subsidence_rate: [0.0, 2.0e-9]
+  SLR: [0.0, 1.0e-3]
+  f_bedload: [0.25, 0.75]
