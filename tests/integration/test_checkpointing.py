@@ -815,3 +815,58 @@ class TestCheckpointingCreatingLoading:
         # raises a permissions error on Windows
         with pytest.raises(PermissionError):
             _ = DeltaModel(input_file=p)
+
+@mock.patch(
+    "pyDeltaRCM.iteration_tools.iteration_tools.solve_water_and_sediment_timestep",
+    new=utilities.FastIteratingDeltaModel.solve_water_and_sediment_timestep,
+)
+class TestSerialJobResumeCheckpoint:
+    def test_resume_continues_stochastic_trajectory(self, tmp_path: Path) -> None:
+        """Resuming via a serial preprocessor job continues the checkpointed
+        random state instead of restarting from the initial seed.
+
+        A continuous reference run is compared against a run that saves a
+        checkpoint after 3 updates and is then resumed through the serial
+        preprocessor until it reaches the same model time. The resumed run
+        must match the never-stopped run exactly.
+        """
+        # continuous reference run: 8 updates, no checkpointing
+        ref_p, ref_f = utilities.create_temporary_file(tmp_path, "ref.yaml")
+        utilities.write_parameter_to_file(ref_f, "out_dir", tmp_path / "out_ref")
+        utilities.write_parameter_to_file(ref_f, "seed", 0)
+        ref_f.close()
+        refModel = DeltaModel(input_file=ref_p)
+        for _ in range(0, 8):
+            refModel.update()
+        refModel.finalize()
+
+        # stage 1: save a checkpoint at every update, for 3 updates
+        st1_p, st1_f = utilities.create_temporary_file(tmp_path, "stage1.yaml")
+        utilities.write_parameter_to_file(st1_f, "out_dir", tmp_path / "out_stage1")
+        utilities.write_parameter_to_file(st1_f, "seed", 0)
+        utilities.write_parameter_to_file(st1_f, "save_checkpoint", True)
+        utilities.write_parameter_to_file(st1_f, "checkpoint_dt", 25000)
+        st1_f.close()
+        stage1Model = DeltaModel(input_file=st1_p)
+        for _ in range(0, 3):
+            stage1Model.update()
+        stage1Model.finalize()
+
+        # stage 2: resume the checkpointed state through a serial
+        #   preprocessor job, running to the same end time as the reference
+        #   (preprocessor job durations are relative to the job start, so
+        #   5 updates from the checkpoint time of 75000 reaches 200000)
+        st2_p, st2_f = utilities.create_temporary_file(tmp_path, "stage2.yaml")
+        utilities.write_parameter_to_file(st2_f, "out_dir", tmp_path / "out_stage2")
+        utilities.write_parameter_to_file(st2_f, "seed", 0)
+        utilities.write_parameter_to_file(
+            st2_f, "resume_checkpoint", str(tmp_path / "out_stage1")
+        )
+        st2_f.close()
+        pp = preprocessor.Preprocessor(input_file=st2_p, timesteps=5)
+        pp.run_jobs()
+        resumeModel = pp._job_list[0].deltamodel
+
+        assert resumeModel.time == refModel.time
+        assert np.all(refModel.eta == resumeModel.eta)
+        assert np.all(refModel.uw == resumeModel.uw)
