@@ -7,6 +7,7 @@ import pytest
 import unittest.mock as mock
 
 from pyDeltaRCM.model import DeltaModel
+from pyDeltaRCM import sed_tools
 from . import utilities
 
 
@@ -150,3 +151,53 @@ class TestForceDeposit:
 
         # should be no lost volume since force_deposit = True
         assert vol_lost == pytest.approx(0)
+
+
+class TestGetWeightAtCellSedimentFallback:
+    """Regression tests for the zero-weight fallback at row-0 cells.
+
+    The padded ghost cells above row 0 are edge-replicated copies of the
+    row-0 cell (channel, not walls). The fallback must never weight
+    them, because a parcel that steps there wraps Python negative
+    indices onto the outflow row.
+    """
+
+    def _fallback_weights(self, ind):
+        distances_flat = np.array(
+            [np.sqrt(2), 1, np.sqrt(2), 1, 1, 1, np.sqrt(2), 1, np.sqrt(2)],
+            dtype=np.float32,
+        )
+        # all neighbors dry => main-path weights all zero => fallback fires
+        depth_nbrs = np.zeros(9, dtype=np.float32)
+        # ghost window entries (0-2) replicate the row-0 channel cell;
+        # cells beside the channel in the padded window are walls (-2)
+        ct_nbrs = np.array([1, 1, 1, -2, 1, -2, 0, 1, 0], dtype=np.int64)
+        weight_int = np.zeros(9, dtype=np.float32)
+        mod_sed_weight = np.ones(9, dtype=np.float32)
+        return sed_tools._get_weight_at_cell_sediment(
+            ind,
+            weight_int,
+            depth_nbrs,
+            ct_nbrs,
+            0.1,  # dry_depth
+            1.0,  # theta
+            distances_flat,
+            mod_sed_weight,
+        )
+
+    def test_row0_fallback_excludes_ghost_cells(self) -> None:
+        weights = self._fallback_weights((0, 5))
+        # the ghost cells above row 0 get no weight
+        assert np.all(weights[0:3] == 0)
+        # walls (3, 5) and the center (4) remain excluded
+        assert np.all(weights[[3, 4, 5]] == 0)
+        # in-domain options remain and the weights are normalized
+        assert np.any(weights[6:] > 0)
+        assert weights.sum() == pytest.approx(1.0)
+
+    def test_non_row0_fallback_keeps_up_directions(self) -> None:
+        # away from row 0, window entries 0-2 are in-domain cells
+        weights = self._fallback_weights((1, 5))
+        assert np.any(weights[0:3] > 0)
+        assert weights.sum() == pytest.approx(1.0)
+

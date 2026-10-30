@@ -290,6 +290,14 @@ def _get_weight_at_cell_sediment(
         # disallow movement into walls
         weight[wall] = 0
 
+        # disallow movement out of the domain through the padded ghost
+        # cells above row 0: edge replication makes them copies of the
+        # row-0 cell (not walls), so this fallback can assign them
+        # weight; a step there would wrap Python negative indices onto
+        # the outflow row
+        if ind[0] == 0:
+            weight[:3] = 0
+
     weight[ctr] = 0  # enforce
 
     # sanity check
