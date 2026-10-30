@@ -39,3 +39,11 @@ Preprocessor function and utilities
 .. autofunction:: preprocessor_wrapper
 .. autofunction:: scale_relative_sea_level_rise_rate
 .. autofunction:: _write_yaml_config_to_file
+
+Command line interface
+----------------------
+
+.. toctree::
+    :maxdepth: 1
+
+    cli
