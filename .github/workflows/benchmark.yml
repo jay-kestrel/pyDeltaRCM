@@ -110,7 +110,9 @@ jobs:
       shell: bash
       run: |
         "$VIRTUAL_PY" -m pip install --upgrade pip setuptools
-        "$VIRTUAL_PY" -m pip install -r requirements.txt
+        # pytest lives in requirements-test.txt, not requirements.txt; the
+        # pytest step below fails with ModuleNotFoundError without it
+        "$VIRTUAL_PY" -m pip install -r requirements.txt -r requirements-test.txt
 
     - name: Install pyDeltaRCM
       shell: bash
@@ -125,4 +127,10 @@ jobs:
     - name: List parity results
       shell: bash
       run: |
-        find benchmarks/results -type f -print | head -20
+        # the parity tests write to a pytest tmp_path, so benchmarks/results
+        # is not created here; report its absence instead of failing on find
+        if [ -d benchmarks/results ]; then
+          find benchmarks/results -type f -print | head -20
+        else
+          echo "no benchmarks/results directory was produced"
+        fi
