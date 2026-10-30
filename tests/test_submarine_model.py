@@ -81,7 +81,8 @@ class TestSubmarineModelConstruction:
         cfg = _minimal_config()
         cfg["current_thickness"] = 2.5
         p = utilities.yaml_from_dict(tmp_path, "submarine.yaml", cfg)
-        delta = SubmarineFanModel(input_file=p)
+        with pytest.warns(UserWarning, match="current_thickness"):
+            delta = SubmarineFanModel(input_file=p)
         assert delta.current_thickness == 2.5
         assert delta.h_current == 2.5
 
@@ -103,7 +104,8 @@ class TestSubmarineModelConstruction:
         cfg["coeff_gamma_density"] = 1.5
         cfg["current_thickness"] = 2.0
         p = utilities.yaml_from_dict(tmp_path, "submarine.yaml", cfg)
-        delta = SubmarineFanModel(input_file=p)
+        with pytest.warns(UserWarning, match="current_thickness"):
+            delta = SubmarineFanModel(input_file=p)
         expected = 1.5 * delta.g * 0.05 * delta.dx / delta.u_current**2
         assert delta.gamma_density == pytest.approx(expected)
         assert delta.h_current == 2.0
