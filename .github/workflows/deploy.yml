@@ -23,7 +23,7 @@ jobs:
       with:
         python-version: "3.13"
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      run: rustup default stable
     - name: Install dependencies
       shell: bash
       run: |

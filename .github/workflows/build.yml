@@ -30,7 +30,7 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      run: rustup default stable
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -64,7 +64,7 @@ jobs:
       with:
         python-version: ${{ env.PYTHON }}
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      run: rustup default stable
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -102,7 +102,7 @@ jobs:
       with:
         python-version: '3.13'
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      run: rustup default stable
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
