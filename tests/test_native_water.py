@@ -91,6 +91,23 @@ def test_forced_walks_and_flux_are_exact(model, monkeypatch, direction, loop):
         np.testing.assert_array_equal(result[name], getattr(model, name), err_msg=name)
 
 
+@pytest.mark.parametrize("count", [1, 2, 20])
+def test_duplicate_inlet_parcels_contribute_all_discharge(model, monkeypatch, count):
+    """#10 accumulates ghost-node flux for every parcel, not unique starts."""
+    model._stepmax = 0  # isolate the inlet injection from subsequent steps
+    start = int(model.inlet[0])
+    model.start_indices = np.full(count, start, dtype=np.int64)
+    model.free_surf_walk_inds = np.zeros((count, 2), dtype=np.int64)
+    model.free_surf_flag = np.ones(count, dtype=np.int64)
+    monkeypatch.setattr(model, "get_water_weight_array", lambda: None)
+    result = _native.water_phase(*native_water.phase_inputs(model), 11)
+    model.run_water_iteration()
+    for name in ("qxn", "qyn", "qwn"):
+        np.testing.assert_array_equal(result[name], getattr(model, name))
+    expected = np.float32(count * model.Qp_water / model.dx / 2)
+    assert result["qwn"].ravel()[start] == expected
+
+
 def test_native_repeat_is_bit_identical(model):
     args = native_water.phase_inputs(model)
     first = _native.water_phase(*args, 919)

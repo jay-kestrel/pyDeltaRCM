@@ -173,10 +173,14 @@ fn route(
         columns: config.columns,
     };
     let amount = config.qp / config.dx / 2.0;
+    let mut inlet_counts = vec![0_usize; size];
     for &start in starts {
-        out.qx[start as usize] += 1.0;
-        // NumPy advanced-index += adds only once per unique inlet here.
-        out.qw[start as usize] = amount as f32;
+        inlet_counts[start as usize] += 1;
+    }
+    for (index, &count) in inlet_counts.iter().enumerate() {
+        out.qx[index] = count as f32;
+        // Match Python's unique/count reduction, including its single f32 cast.
+        out.qw[index] = (count as f64 * config.qp / config.dx / 2.0) as f32;
     }
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
     let mut current = starts.to_vec();
