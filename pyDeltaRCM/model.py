@@ -257,7 +257,13 @@ class DeltaModel(
         self._is_finalized = True
 
     def _teardown_log_handler(self) -> None:
-        """Remove and close the per-run log file handler, if present."""
+        """Remove and close the per-run log file handler, if present.
+
+        Idempotent. Standalone models get this for free from
+        :obj:`finalize`; preprocessor jobs defer it until after their
+        final stage reporting, which is written to the same log file
+        after ``finalize`` returns.
+        """
         if getattr(self, "_log_fh", None) is not None:
             self.logger.removeHandler(self._log_fh)
             self._log_fh.close()
