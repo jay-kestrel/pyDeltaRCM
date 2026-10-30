@@ -1,3 +1,4 @@
+import glob
 import locale
 import os
 import platform
@@ -5,9 +6,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 from .. import utilities
 import pyDeltaRCM as _pyimportedalias
+from pyDeltaRCM.shared_tools import custom_yaml_loader
 
 
 class TestCommandLineInterfaceDirectly:
@@ -198,3 +201,104 @@ class TestCommandLineInterfaceDirectly:
             stdout=subprocess.PIPE, encoding=encoding)
         _exp_str2 = 'pyDeltaRCM ' + _pyimportedalias.__version__ + '\n'
         assert printed2.stdout == _exp_str2
+
+
+class TestQolCommandLineFlags:
+
+    def test_qol_new_flag(self, tmp_path: Path) -> None:
+        """
+        test the --new flag scaffolds a starter configuration file.
+        """
+        p = tmp_path / 'starter.yml'
+        subprocess.check_output(['pyDeltaRCM', '--new', str(p)])
+        assert p.is_file()
+        with open(p, mode='r') as f:
+            loaded = yaml.load(f, Loader=custom_yaml_loader())
+        assert loaded['timesteps'] == 10
+
+    def test_qol_new_flag_python_main_call(self, tmp_path: Path) -> None:
+        """
+        test the --new flag via the python -m entry point.
+        """
+        p = tmp_path / 'starter.yml'
+        subprocess.check_output(['python', '-m', 'pyDeltaRCM', '--new', str(p)])
+        assert p.is_file()
+
+    def test_qol_new_flag_refuses_overwrite(self, tmp_path: Path) -> None:
+        """
+        test the --new flag does not overwrite an existing file.
+        """
+        p = tmp_path / 'starter.yml'
+        p.write_text('existing: file\n')
+        _run = subprocess.run(
+            ['pyDeltaRCM', '--new', str(p)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding=locale.getpreferredencoding())
+        assert _run.returncode == 1
+        assert p.read_text() == 'existing: file\n'
+
+    def test_qol_validate_flag_valid_config(self, tmp_path: Path) -> None:
+        """
+        test the --validate flag passes a valid config and writes nothing.
+        """
+        file_name = 'user_parameters.yaml'
+        p, f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(f, 'out_dir', tmp_path / 'test')
+        utilities.write_parameter_to_file(f, 'seed', 0)
+        utilities.write_parameter_to_file(f, 'timesteps', 2)
+        f.close()
+        printed = subprocess.check_output(
+            ['pyDeltaRCM', '--validate', str(p)],
+            stderr=subprocess.STDOUT)
+        assert b'OK' in printed
+        # validation must not create the output directory
+        assert not (tmp_path / 'test').exists()
+
+    def test_qol_validate_flag_invalid_config(self, tmp_path: Path) -> None:
+        """
+        test the --validate flag reports unknown keys and type errors.
+        """
+        file_name = 'user_parameters.yaml'
+        p, f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(f, 'out_dir', tmp_path / 'test')
+        utilities.write_parameter_to_file(f, 'banana', 3)
+        utilities.write_parameter_to_file(f, 'Np_sed', 'many')
+        utilities.write_parameter_to_file(f, 'timesteps', 2)
+        f.close()
+        _run = subprocess.run(
+            ['pyDeltaRCM', '--validate', str(p)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding=locale.getpreferredencoding())
+        assert _run.returncode == 1
+        assert 'banana' in _run.stdout
+        assert 'Np_sed' in _run.stdout
+
+    def test_qol_validate_flag_missing_file(self, tmp_path: Path) -> None:
+        """
+        test the --validate flag reports a missing configuration file.
+        """
+        _run = subprocess.run(
+            ['pyDeltaRCM', '--validate', str(tmp_path / 'nope.yml')],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding=locale.getpreferredencoding())
+        assert _run.returncode == 1
+        assert 'not found' in _run.stdout
+
+    def test_qol_demo_flag(self, tmp_path: Path) -> None:
+        """
+        test the --demo flag writes and runs a tiny demonstration model.
+        """
+        env = os.environ.copy()
+        env['NUMBA_DISABLE_JIT'] = '1'
+        env['DISABLE_JIT'] = '1'  # matches the .numba_config.yaml key used in CI
+        demo_dir = tmp_path / 'demo'
+        subprocess.check_output(
+            ['pyDeltaRCM', '--demo', str(demo_dir)], env=env)
+        # the demo configuration was written and run through the standard path
+        assert (demo_dir / 'pyDeltaRCM_demo.yaml').is_file()
+        exp_path_nc = (demo_dir / 'pyDeltaRCM_demo_output' / 'job_000' /
+                       'pyDeltaRCM_output.nc')
+        assert exp_path_nc.is_file()
+        figs = glob.glob(
+            str(demo_dir / 'pyDeltaRCM_demo_output' / 'job_000' / 'eta_*.png'))
+        assert len(figs) > 0
