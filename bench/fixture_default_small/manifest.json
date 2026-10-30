@@ -1,0 +1,497 @@
+{
+  "arrays": {
+    "Vp_dep_mud": {
+      "dtype": "float32",
+      "file": "state/Vp_dep_mud.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "Vp_dep_sand": {
+      "dtype": "float32",
+      "file": "state/Vp_dep_sand.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "X": {
+      "dtype": "float64",
+      "file": "state/X.npy",
+      "role": "init_derived",
+      "sha256": "584d9aa42a25f269dd750b36585e0bf2660b669def0cdcacc289addce556f505",
+      "shape": [
+        11,
+        11
+      ]
+    },
+    "Y": {
+      "dtype": "float64",
+      "file": "state/Y.npy",
+      "role": "init_derived",
+      "sha256": "19d327a4a6c5b5d28d49c552e587c4170e45bb08402f9b9a84844c6386e22680",
+      "shape": [
+        11,
+        11
+      ]
+    },
+    "active_layer": {
+      "dtype": "float32",
+      "file": "state/active_layer.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "cell_type": {
+      "dtype": "int64",
+      "file": "state/cell_type.npy",
+      "role": "state",
+      "sha256": "886d941da54b3330833465336ea6bc4afe79e234c552de7bb6d17c32e567ade6",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "depth": {
+      "dtype": "float32",
+      "file": "state/depth.npy",
+      "role": "state",
+      "sha256": "571b1ea56e7f322a9377c17db72762684fdaeeecb7b163cc14df03fc261fee22",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "distances": {
+      "dtype": "float32",
+      "file": "state/distances.npy",
+      "role": "init_derived",
+      "sha256": "beb55a59426d2999e8721dbeb93249029de4d63e3e49cb9a2299cea8fa2c8efb",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "distances_flat": {
+      "dtype": "float32",
+      "file": "state/distances_flat.npy",
+      "role": "init_derived",
+      "sha256": "13037501f6f67ca2d0f98d7fb95d66dbe05c5216e6b8639e8acfc33bbe41ad46",
+      "shape": [
+        9
+      ]
+    },
+    "eta": {
+      "dtype": "float32",
+      "file": "state/eta.npy",
+      "role": "state",
+      "sha256": "2b97a5bd08e1d6a98250ecea192c551944fd182d9ed4ef27de5d11808066abc4",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "eta0": {
+      "dtype": "float32",
+      "file": "state/eta0.npy",
+      "role": "state",
+      "sha256": "2b97a5bd08e1d6a98250ecea192c551944fd182d9ed4ef27de5d11808066abc4",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "eta_init": {
+      "dtype": "float32",
+      "file": "state/eta_init.npy",
+      "role": "state",
+      "sha256": "2b97a5bd08e1d6a98250ecea192c551944fd182d9ed4ef27de5d11808066abc4",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "inlet": {
+      "dtype": "int64",
+      "file": "state/inlet.npy",
+      "role": "state",
+      "sha256": "3fe5daa8933719a7e92ff2deb637069d6449a5ed02f3f2a64ee857a891068b98",
+      "shape": [
+        3
+      ]
+    },
+    "ivec": {
+      "dtype": "float32",
+      "file": "state/ivec.npy",
+      "role": "init_derived",
+      "sha256": "6cf0968fb96ce8421f6daafa7ecf9c65896e85d367668dd6e2c463e8543ec396",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "ivec_flat": {
+      "dtype": "float32",
+      "file": "state/ivec_flat.npy",
+      "role": "init_derived",
+      "sha256": "f25f76cd47c81d91f3da8b16560a56a3fc63a77f79be0f8c9a9dd0dd2804b036",
+      "shape": [
+        9
+      ]
+    },
+    "iwalk": {
+      "dtype": "int64",
+      "file": "state/iwalk.npy",
+      "role": "init_derived",
+      "sha256": "ad4d41824523963aa31b811c4bd01a0e4e366df598f3d8f2a64d640b197d9763",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "iwalk_flat": {
+      "dtype": "int64",
+      "file": "state/iwalk_flat.npy",
+      "role": "init_derived",
+      "sha256": "729b51e01b31e06dbd98d5fd9bd240bb35cf3aa333043809bcd97f4e6f897202",
+      "shape": [
+        9
+      ]
+    },
+    "jvec": {
+      "dtype": "float32",
+      "file": "state/jvec.npy",
+      "role": "init_derived",
+      "sha256": "191edf5ef9a547bc6df3758a8ade2286ac01f412d27f5b7c76c371b909d6534e",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "jvec_flat": {
+      "dtype": "float32",
+      "file": "state/jvec_flat.npy",
+      "role": "init_derived",
+      "sha256": "1782630cc1a7b6218756ee9ac431c543cb9199b1560e01b6b02ae3cece553c6a",
+      "shape": [
+        9
+      ]
+    },
+    "jwalk": {
+      "dtype": "int64",
+      "file": "state/jwalk.npy",
+      "role": "init_derived",
+      "sha256": "587632d2b04cea58b0cf0cc047c606e9f0ebc4f6b5f389ff03e37ab75c76c3c2",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "jwalk_flat": {
+      "dtype": "int64",
+      "file": "state/jwalk_flat.npy",
+      "role": "init_derived",
+      "sha256": "9cec548e0482e0cba00c84b4368cb45b04984352dd6298d8273001f41f84ec18",
+      "shape": [
+        9
+      ]
+    },
+    "kernel1": {
+      "dtype": "int64",
+      "file": "state/kernel1.npy",
+      "role": "init_derived",
+      "sha256": "4fe9bf1c6d2cca1571c4c0dc751f51e74e625482333d8b5f54e37450d5272d00",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "kernel2": {
+      "dtype": "int64",
+      "file": "state/kernel2.npy",
+      "role": "init_derived",
+      "sha256": "44aac014c6f91ba4c645845718ada72c337aae5fc1475fa0252cdb16e1cedd67",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "mod_erosion": {
+      "dtype": "float32",
+      "file": "state/mod_erosion.npy",
+      "role": "init_derived",
+      "sha256": "c9ca1a7ac47c47768bb682179fe70f092dd645e6b1eeb8d96554e1a5ee1f4931",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "mod_sed_weight": {
+      "dtype": "float32",
+      "file": "state/mod_sed_weight.npy",
+      "role": "init_derived",
+      "sha256": "c9ca1a7ac47c47768bb682179fe70f092dd645e6b1eeb8d96554e1a5ee1f4931",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "mod_stable_weight": {
+      "dtype": "float32",
+      "file": "state/mod_stable_weight.npy",
+      "role": "init_derived",
+      "sha256": "c9ca1a7ac47c47768bb682179fe70f092dd645e6b1eeb8d96554e1a5ee1f4931",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "mod_water_weight": {
+      "dtype": "float32",
+      "file": "state/mod_water_weight.npy",
+      "role": "init_derived",
+      "sha256": "c9ca1a7ac47c47768bb682179fe70f092dd645e6b1eeb8d96554e1a5ee1f4931",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qs": {
+      "dtype": "float32",
+      "file": "state/qs.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qw": {
+      "dtype": "float32",
+      "file": "state/qw.npy",
+      "role": "state",
+      "sha256": "94690417a52bbfe8223f3c3f1875757938b99463dd527dfadceba2e97231c8c0",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qwn": {
+      "dtype": "float32",
+      "file": "state/qwn.npy",
+      "role": "init_derived",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qx": {
+      "dtype": "float32",
+      "file": "state/qx.npy",
+      "role": "state",
+      "sha256": "94690417a52bbfe8223f3c3f1875757938b99463dd527dfadceba2e97231c8c0",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qxn": {
+      "dtype": "float32",
+      "file": "state/qxn.npy",
+      "role": "init_derived",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qy": {
+      "dtype": "float32",
+      "file": "state/qy.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "qyn": {
+      "dtype": "float32",
+      "file": "state/qyn.npy",
+      "role": "init_derived",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "ravel_walk": {
+      "dtype": "int64",
+      "file": "state/ravel_walk.npy",
+      "role": "init_derived",
+      "sha256": "fe8312c9c8d5c1308f87e362735efb2ffcd6bc6d3ef8a9d9b5737692ba3819f0",
+      "shape": [
+        3,
+        3
+      ]
+    },
+    "ravel_walk_flat": {
+      "dtype": "int64",
+      "file": "state/ravel_walk_flat.npy",
+      "role": "init_derived",
+      "sha256": "397553ed7cb47934f2e196ca06bf7242503a24674d3d0b97a15e95adde5937f7",
+      "shape": [
+        9
+      ]
+    },
+    "sand_frac": {
+      "dtype": "float32",
+      "file": "state/sand_frac.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "sfc_sum": {
+      "dtype": "float32",
+      "file": "state/sfc_sum.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "sfc_visit": {
+      "dtype": "float32",
+      "file": "state/sfc_visit.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "stage": {
+      "dtype": "float32",
+      "file": "state/stage.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "uw": {
+      "dtype": "float32",
+      "file": "state/uw.npy",
+      "role": "state",
+      "sha256": "94690417a52bbfe8223f3c3f1875757938b99463dd527dfadceba2e97231c8c0",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "ux": {
+      "dtype": "float32",
+      "file": "state/ux.npy",
+      "role": "state",
+      "sha256": "94690417a52bbfe8223f3c3f1875757938b99463dd527dfadceba2e97231c8c0",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "uy": {
+      "dtype": "float32",
+      "file": "state/uy.npy",
+      "role": "state",
+      "sha256": "c9bef594bb5b1f9826af00a00e8f013421b5965ebce41809ed98c996ec76e0e9",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "x": {
+      "dtype": "int64",
+      "file": "state/x.npy",
+      "role": "init_derived",
+      "sha256": "5d1a8ce8cc9f293780a07a1652312d6b061339723e6c843985e1510c9a085c19",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "xc": {
+      "dtype": "float64",
+      "file": "state/xc.npy",
+      "role": "init_derived",
+      "sha256": "68098d84e308df9c572c7a72f8c24a996d53da2239c788ff57af6fbecdaa0c21",
+      "shape": [
+        10
+      ]
+    },
+    "y": {
+      "dtype": "int64",
+      "file": "state/y.npy",
+      "role": "init_derived",
+      "sha256": "dcbbcbe8c6931e29f12fee02cbe3c064eff0e07251a02821f3bb4140680f6d3c",
+      "shape": [
+        10,
+        10
+      ]
+    },
+    "yc": {
+      "dtype": "float64",
+      "file": "state/yc.npy",
+      "role": "init_derived",
+      "sha256": "68098d84e308df9c572c7a72f8c24a996d53da2239c788ff57af6fbecdaa0c21",
+      "shape": [
+        10
+      ]
+    }
+  },
+  "contract": {
+    "coordinate_vectors": "float64 (xc, yc, X, Y) as held post-init",
+    "encoding": "uncompressed .npy (NumPy array format v1.0)",
+    "free_surface_note": "free-surface temporaries inside the reference's update() are float64; they are internal to the update loop and not part of the fixture",
+    "index_grids": "int64 (cell_type, inlet, walk constants)",
+    "state_fields": "float32 as the reference computes in"
+  },
+  "excluded_scratch_buffers": {
+    "free_surf_flag": {
+      "dtype": "int64",
+      "note": "zeroed and refilled at the start of every water iteration (water_tools.py); excluded from the fixture -- allocate zeros",
+      "shape": [
+        10
+      ]
+    },
+    "free_surf_walk_inds": {
+      "dtype": "int64",
+      "note": "zeroed and refilled at the start of every water iteration (water_tools.py); excluded from the fixture -- allocate zeros",
+      "shape": [
+        10,
+        20
+      ]
+    }
+  },
+  "format": "pydeltarcm-benchmark-fixture/1",
+  "rng": {
+    "anchor": "seed(0) first uniform == 0.5488135039273248 (tests/test_shared_tools.py)",
+    "position_at_fixture": "freshly seeded; init consumes no draws",
+    "seed_documented_in": "config.json _seed",
+    "stream": "NumPy legacy MT19937 (Numba njit-verified bit-identical)"
+  },
+  "source_config_sha256": "e41f0bc00022824ce3405ac2b9df1b154f6e27b0860377bd8e1df12170cae915"
+}

@@ -1,0 +1,34 @@
+# 10x10 parity fixture -- byte-matches the config in
+# tests/integration/test_consistent_outputs.py::TestConsistentOutputsBetweenMerges
+# (out_dir intentionally absent: the normalizer and run_reference.py inject
+# throwaway directories). The golden eta gates in golden.json were pinned by
+# that test class and verified reproducible on this checkout.
+Length: 10.0
+Width: 10.0
+seed: 0
+dx: 1.0
+L0_meters: 1.0
+S0: 0.0002
+itermax: 1
+Np_water: 10
+u0: 1.0
+N0_meters: 3.0
+h0: 1.0
+H_SL: 0.0
+SLR: 0.001
+Np_sed: 10
+f_bedload: 0.5
+C0_percent: 0.1
+toggle_subsidence: false
+start_subsidence: 50.0
+save_eta_figs: false
+save_stage_figs: false
+save_depth_figs: false
+save_discharge_figs: false
+save_velocity_figs: false
+save_eta_grids: false
+save_stage_grids: false
+save_depth_grids: false
+save_discharge_grids: false
+save_velocity_grids: false
+save_dt: 500

@@ -1,0 +1,36 @@
+# Default-grid benchmark fixture -- pyDeltaRCM defaults (100x200 cells at
+# dx=50 m: Length 5000 m x Width 10000 m) with Np_water = Np_sed = 2000 and
+# itermax 3, seed 0. This is the workload the measured ~3.5 s/update warm
+# serial routing number refers to. All output writing is disabled so the
+# timed region around update() is pure computation.
+Length: 5000.0
+Width: 10000.0
+dx: 50.0
+L0_meters: 150.0
+S0: 0.00015
+itermax: 3
+Np_water: 2000
+Np_sed: 2000
+u0: 1.0
+N0_meters: 250.0
+h0: 5.0
+H_SL: 0.0
+SLR: 0.0
+f_bedload: 0.5
+C0_percent: 0.1
+toggle_subsidence: false
+start_subsidence: 50.0
+seed: 0
+verbose: 0
+save_eta_figs: false
+save_stage_figs: false
+save_depth_figs: false
+save_discharge_figs: false
+save_velocity_figs: false
+save_eta_grids: false
+save_stage_grids: false
+save_depth_grids: false
+save_discharge_grids: false
+save_velocity_grids: false
+save_dt: 1000000000000
+save_checkpoint: false

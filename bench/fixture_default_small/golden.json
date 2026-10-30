@@ -1,0 +1,22 @@
+{
+  "slice": "eta[:5, 4]",
+  "checkpoints": {
+    "1": [
+      -1.0,
+      -0.9152762,
+      -1.0004134,
+      -1.0,
+      -1.0
+    ],
+    "10": [
+      1.7,
+      0.394864,
+      -0.95006764,
+      -1.0,
+      -1.0
+    ]
+  },
+  "tolerance": "rtol 1e-6, atol 0 (matches pytest.approx default rel in the source test)",
+  "source": "tests/integration/test_consistent_outputs.py::TestConsistentOutputsBetweenMerges::test_bed_after_one_update and ::test_bed_after_ten_updates (config mirrors this fixture's config.yaml, N0_meters=3.0, seed=0)",
+  "rng_anchor": "seed(0) first uniform == 0.5488135039273248 (tests/test_shared_tools.py::TestSetRandomSeed)"
+}
