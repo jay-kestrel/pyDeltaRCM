@@ -1,6 +1,6 @@
 # P2 water-phase validation
 
-The P1 harness measured **3.09× faster updates** for the native water backend
+The P1 harness measured **3.27× faster updates** for the native water backend
 on the early-water scenario on 2026-10-30. These are local Linux measurements,
 not a claim about other machines or sediment-dominated workloads.
 
@@ -13,14 +13,18 @@ The two backend runs were sequential, after the test process had completed.
 | Run | Source | Mean ± sample SD (seconds/update) |
 | --- | --- | --- |
 | Pre-port P1 checkout, `58003912` | `pre_port.json` | 0.5781 ± 0.1054 |
-| P2 reference backend, `bd905c8` | `reference.json` | 0.5795 ± 0.1060 |
-| P2 native backend, `bd905c8` | `native.json` | 0.1877 ± 0.0081 |
+| P2 reference backend, `0803d7f` | `reference.json` | 0.5939 ± 0.0814 |
+| P2 native backend, `0803d7f` | `native.json` | 0.1818 ± 0.0088 |
 
-Speedup is reference mean / native mean = 3.0878, exceeding the 2× water-phase
+Speedup is reference mean / native mean = 3.2663, exceeding the 2× water-phase
 gate. JSON contains every timed sample, configuration, timestamp, package
 version and full commit hash. `pre_port.json` was captured before dispatch
 was changed; its harness predates the explicit `water_backend` field.
-The P2 JSON files identify the selected backend explicitly.
+The P2 JSON files identify the selected backend explicitly. These reruns
+include develop's routing and checkpoint fixes through `3f98723`; the earlier
+pre-port measurement is historical context, not the speedup denominator.
+Tests and benchmarks ran at `0803d7fd6d189eb98db5e1a53cd0d25e7ddc94f4`;
+the following commit refreshes evidence only.
 
 Commands (with the same Python environment and release-built extension):
 
@@ -51,8 +55,8 @@ This finite ensemble does not establish equivalence for every configuration.
 ## Other local checks
 
 The installed-extension suite at the implementation above passed on Linux
-with Python 3.13.14: 443 passed, 2 skipped, 1 xfailed, with pytest-mpl enabled
-(329.86 seconds). Native contract tests under no-JIT coverage mode: 30 passed,
+with Python 3.13.14: 458 passed, 2 skipped, 1 xfailed, with pytest-mpl enabled
+(343.35 seconds). Native contract tests under no-JIT coverage mode: 30 passed,
 1 skipped; the skip concerns the existing Numba-only checkpoint RNG helper.
 Rust formatting and clippy (`--all-targets -- -D warnings`) passed. New Python
 modules pass Ruff; touched legacy modules pass syntax/error lint. CI remains
