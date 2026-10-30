@@ -700,10 +700,12 @@ def _get_weight_at_cell_water(
                 # no wet (and valid) neighbors. How did we get here??
                 #    Maybe by flooding corrections? Solution is to
                 #    allow to walk into any non-land cell, true random
-                nnotwall = np.sum(~wall)
+                #    (still never out of the domain: honor `invalid`)
+                notwallvalid = np.logical_and(~wall, ~invalid)
+                nnotwall = np.sum(notwallvalid)
                 weight[:] = 0
                 if nnotwall > 0:
-                    weight[~wall] = 1 / nnotwall
+                    weight[notwallvalid] = 1 / nnotwall
                 else:
                     raise RuntimeError(
                         "No non-wall cells surrounding cell."

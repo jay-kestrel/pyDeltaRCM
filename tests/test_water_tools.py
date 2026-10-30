@@ -346,3 +346,71 @@ class TestUpdateFlowField:
         assert np.all(delta.uw[dmask] != 0)
 
         assert delta.log_info.call_count == 1
+
+
+class TestGetWeightAtCellWaterGhostUp:
+    """Regression tests for row-0 ghost-cell exclusion.
+
+    The padded ghost cells above row 0 are edge-replicated copies of
+    the row-0 cell (channel, not walls). Neither the main path nor the
+    zero-weight fallbacks may weight them, because a parcel that steps
+    there wraps Python negative indices onto the outflow row.
+    """
+
+    def _dried_inlet_weights(self, ind):
+        # dried row-0 channel cell: main-path weights are all zero and
+        # the wetvalid fallback is empty, so the deep fallback fires
+        dry_thresh = 0.1
+        gamma = 0.001962
+        theta = 1
+        weight_sfc = np.zeros(9)
+        weight_int = np.zeros(9)
+        depth = np.zeros(9)  # every neighbor is dry, incl. ghost replicas
+        mod_water_weight = np.ones(9)
+        # ghost-up window entries replicate the row-0 channel cell (1);
+        # row-1 neighbors beside the channel are walls (-2)
+        celltype = np.array([1, 1, 1, -2, 1, -2, 0, 0, 0])
+        return water_tools._get_weight_at_cell_water(
+            ind, weight_sfc, weight_int, depth,
+            mod_water_weight, celltype, dry_thresh, gamma, theta)
+
+    def test_row0_fallback_excludes_ghost_up(self) -> None:
+        wts = self._dried_inlet_weights((0, 6))
+        assert np.all(wts[0:3] == 0)  # ghost cells above row 0
+        assert np.all(wts[[3, 4, 5]] == 0)  # walls and center
+        assert np.any(wts[6:] > 0)  # in-domain options remain
+        assert wts.sum() == pytest.approx(1.0)
+
+    def test_non_row0_keeps_up_directions(self) -> None:
+        # away from row 0, the "up" window entries are in-domain cells
+        wts = self._dried_inlet_weights((2, 6))
+        assert np.any(wts[0:3] > 0)
+        assert wts.sum() == pytest.approx(1.0)
+
+
+class TestRunWaterIterationDriedInlet:
+    """Regression: routing must never step parcels out of the domain
+    through the padded ghost cells above row 0."""
+
+    def test_dried_inlet_stays_in_domain(self, tmp_path: Path) -> None:
+        # create a delta with default settings
+        p = utilities.yaml_from_dict(tmp_path, 'input.yaml')
+        delta = DeltaModel(input_file=p)
+        delta.log_info = mock.MagicMock()
+
+        # dry the channel entrance to force the zero-weight fallbacks
+        # at the row-0 inlet cells
+        delta.depth[:3, delta.inlet] = 0
+
+        delta.init_water_iteration()
+        delta.get_water_weight_array()
+        inlet_weights = delta.water_weights[0, delta.inlet, :]
+        # no weight on the padded ghost cells above the domain
+        assert np.all(inlet_weights[:, 0:3] == 0)
+        # and the fallback still gives the parcels in-domain options
+        assert np.all(inlet_weights.sum(axis=1) > 0)
+
+        delta.run_water_iteration()
+        # pre-fix, ghost-up picks record negative flat indices here
+        assert np.all(delta.free_surf_walk_inds >= 0)
+
