@@ -29,10 +29,8 @@ dependencies = [
     "numba",
     "numpy"
 ]
-dynamic = [
-    "version",
-    "readme",
-]
+readme = { file = "README.rst", content-type = "text/x-rst" }
+dynamic = ["version"]
 
 [project.license]
 text = "MIT"
@@ -54,28 +52,14 @@ testing = [
 ]
 
 [build-system]
-requires = [
-    "setuptools >=61",
-]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.dynamic.readme]
-file = "README.rst"
-content-type = "text/x-rst"
-
-[tool.setuptools.dynamic.version]
-attr = "pyDeltaRCM._version.__version__"
-
-[tool.setuptools.packages.find]
-where = [
-    ".",
-]
-include = [
-    "pyDeltaRCM*",
-]
+[tool.maturin]
+python-source = "."
+module-name = "pyDeltaRCM._native"
+features = ["extension-module"]
+include = ["pyDeltaRCM/default.yml", "LICENSE"]
 
 [project.scripts]
 pyDeltaRCM = "pyDeltaRCM.preprocessor:preprocessor_wrapper"
