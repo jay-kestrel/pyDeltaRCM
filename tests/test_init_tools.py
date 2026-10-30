@@ -1671,6 +1671,83 @@ class TestCustomInputs:
 
         assert not hasattr(delta, "unused_input_yaml")
 
+class TestParameterRangeValidation:
+    """Zero or negative physical parameters pass the type gate and then
+    crash with a raw ZeroDivisionError inside ``create_domain`` /
+    ``create_boundary_conditions``, far from the configuration mistake
+    (e.g., ``C0_percent: 0`` crashes at ``self._dt = dVs / Qs0``). They
+    must be rejected with a descriptive error naming the parameter.
+    """
+
+    @pytest.mark.parametrize(
+        "parameter, value",
+        [
+            ("C0_percent", 0.0),  # ZeroDivisionError: _dt = dVs / Qs0
+            ("u0", 0),  # ZeroDivisionError: gamma = g*S0*dx/u0**2
+            ("Np_water", 0),  # ZeroDivisionError: Qp_water = Qw0 / Np_water
+            ("Np_sed", 0),  # ZeroDivisionError: Vp_sed = dVs / Np_sed
+            ("dx", 0),  # ZeroDivisionError: Length % dx in create_domain
+            ("h0", 0),  # ZeroDivisionError: N_crossdiff = dVs / V0
+        ],
+    )
+    def test_zero_physical_parameter_rejected(
+        self, tmp_path: Path, parameter: str, value
+    ) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {parameter: value})
+        with pytest.raises(ValueError, match=parameter):
+            DeltaModel(input_file=p)
+
+    def test_negative_physical_parameter_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {"C0_percent": -1.0})
+        with pytest.raises(ValueError, match="C0_percent"):
+            DeltaModel(input_file=p)
+
+    def test_small_positive_values_still_initialize(self, tmp_path: Path) -> None:
+        # the boundary of the old (unvalidated) behavior: strictly positive
+        #   values, however small, must keep initializing
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"C0_percent": 0.01, "u0": 0.5}
+        )
+        _delta = DeltaModel(input_file=p)
+        assert _delta.C0 == 0.01 / 100.0
+
+
+class TestDomainShapeValidation:
+    """The ``L0``/``N0`` clamps apply the ``max()`` floor *after* the
+    ``min(..., W//4)`` cap, so on small domains the floor defeats the cap
+    and an inlet wider than the domain (N0 > W) is constructed silently.
+    That geometry is meaningless and must be rejected.
+    """
+
+    def test_inlet_wider_than_domain_rejected(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"Width": 100, "Length": 100, "dx": 100, "N0_meters": 500},
+        )
+        with pytest.raises(ValueError, match=r"N0.*W"):
+            DeltaModel(input_file=p)
+
+    def test_small_valid_domain_still_initializes(self, tmp_path: Path) -> None:
+        # domains near the floor boundary must keep initializing as long as
+        #   the inlet actually fits the domain
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {
+                "Width": 500,
+                "Length": 500,
+                "dx": 100,
+                "N0_meters": 300,
+                "L0_meters": 300,
+            },
+        )
+        _delta = DeltaModel(input_file=p)
+        assert _delta.N0 <= _delta.W
+        assert _delta.L0 <= _delta.L
+
+
+
 
 class TestTypeErrorMessages:
 

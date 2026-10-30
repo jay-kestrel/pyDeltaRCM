@@ -248,13 +248,26 @@ class DeltaModel(
             raise
 
         # release the per-run log file handler so long-lived embedding
-        # processes do not accumulate open handles
+        # processes do not accumulate open handles. Deferred when a
+        # preprocessor job still needs to log its completion stage
+        # after finalize returns.
+        if not getattr(self, "_defer_log_teardown", False):
+            self._teardown_log_handler()
+
+        self._is_finalized = True
+
+    def _teardown_log_handler(self) -> None:
+        """Remove and close the per-run log file handler, if present.
+
+        Idempotent. Standalone models get this for free from
+        :obj:`finalize`; preprocessor jobs defer it until after their
+        final stage reporting, which is written to the same log file
+        after ``finalize`` returns.
+        """
         if getattr(self, "_log_fh", None) is not None:
             self.logger.removeHandler(self._log_fh)
             self._log_fh.close()
             self._log_fh = None
-
-        self._is_finalized = True
 
     @property
     def out_dir(self) -> str:
@@ -431,6 +444,8 @@ class DeltaModel(
 
     @u0.setter
     def u0(self, u0: float) -> None:
+        if u0 <= 0:
+            raise ValueError("u0 must be a positive number.")
         self._u0 = u0
 
     @property
@@ -464,6 +479,8 @@ class DeltaModel(
 
     @h0.setter
     def h0(self, h0: float) -> None:
+        if h0 <= 0:
+            raise ValueError("h0 must be a positive number.")
         self._h0 = h0
 
     @property
@@ -633,7 +650,7 @@ class DeltaModel(
 
     @C0_percent.setter
     def C0_percent(self, C0_percent: float) -> None:
-        if C0_percent < 0:
+        if C0_percent <= 0:
             raise ValueError("C0_percent must be greater than 0.")
         self._C0_percent = C0_percent
 

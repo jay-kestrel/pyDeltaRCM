@@ -86,6 +86,30 @@ We recommend you check out our `pyDeltaRCM in 10 minutes tutorial <https://delta
 Beyond that brief tutorial, we have a comprehensive `User Documentation <https://deltarcm.org/pyDeltaRCM/index.html#user-documentation>`_ and `Developer Documentation <https://deltarcm.org/pyDeltaRCM/index.html#developer-documentation>`_ to check out.
 
 
+COBOL kernels (experimental)
+############################
+
+The weighted parcel direction pick -- :func:`pyDeltaRCM.shared_tools.random_pick`,
+the arithmetic at the core of every per-parcel water and sediment routing
+step -- has an optional GnuCOBOL backend (``cobol/random_pick.cob``),
+compiled to a shared object and called in-process through a C shim and
+ctypes::
+
+	make -C cobol          # requires GnuCOBOL 3.x (e.g. apt gnucobol3)
+
+Set ``PYDELTARCM_COBOL=1`` to route the ported pick through the COBOL
+kernel; the flag takes precedence over the shared ``PYDELTARCM_NATIVE``
+variable, which continues to govern the fused Rust water phase. With
+routing off, behavior is byte-identical to the reference implementation.
+There is no silent fallback: setting ``PYDELTARCM_COBOL=1`` without a
+built shared object raises an error naming the build step. Random
+numbers are always drawn in Python (the checkpointed MT19937 stream is
+unchanged); the kernel receives pre-drawn uniforms and is a pure
+function of its input buffers. The routine is also timed per backend by
+``benchmarks/benchmark_timestep.py``, which asserts exact pick parity
+between backends on its workload before reporting timings.
+
+
 Citing pyDeltaRCM
 #################
 

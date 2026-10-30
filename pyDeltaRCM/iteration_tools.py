@@ -516,33 +516,49 @@ class iteration_tools(abc.ABC):
         """
         ckp_file = os.path.join(self.prefix, "checkpoint.npz")
 
+        # write to a temporary file in the same directory and atomically
+        #   rename it over the checkpoint: np.savez_compressed truncates
+        #   its target on open, so writing the final path directly means
+        #   a crash mid-write (OOM kill, disk full, interrupt) destroys
+        #   the only checkpoint and the run loses all resumable state.
+        #   the file is opened here and passed as an object, because numpy
+        #   appends ".npz" to string paths that do not already end in it.
+        #   a stale temporary file left by a crash is overwritten by the
+        #   next save and is never read by load_checkpoint.
+        ckp_tmp_file = ckp_file.replace(".npz", ".tmp.npz")
+
         # get rng state as plain arrays; storing the state as an object
         # array would pickle it, making checkpoint files executable code
         rng_arrays = pack_rng_state()
 
-        np.savez_compressed(
-            ckp_file,
-            # time and counter variables
-            time=self.time,
-            time_iter=self._time_iter,
-            save_iter=self._save_iter,
-            save_time_since_data=self._save_time_since_data,
-            save_time_since_checkpoint=self._save_time_since_checkpoint,
-            # grids
-            eta=self.eta,
-            eta0=self.eta0,
-            eta_init=self.eta_init,
-            depth=self.depth,
-            stage=self.stage,
-            uw=self.uw,
-            ux=self.ux,
-            uy=self.uy,
-            qw=self.qw,
-            qx=self.qx,
-            qy=self.qy,
-            sand_frac=self.sand_frac,
-            active_layer=self.active_layer,
-            # boundary condition / state variables
-            H_SL=self._H_SL,
-            **rng_arrays,
-        )
+        with open(ckp_tmp_file, "wb") as f:
+            np.savez_compressed(
+                f,
+                # time and counter variables
+                time=self.time,
+                time_iter=self._time_iter,
+                save_iter=self._save_iter,
+                save_time_since_data=self._save_time_since_data,
+                save_time_since_checkpoint=self._save_time_since_checkpoint,
+                # grids
+                eta=self.eta,
+                eta0=self.eta0,
+                eta_init=self.eta_init,
+                depth=self.depth,
+                stage=self.stage,
+                uw=self.uw,
+                ux=self.ux,
+                uy=self.uy,
+                qw=self.qw,
+                qx=self.qx,
+                qy=self.qy,
+                sand_frac=self.sand_frac,
+                active_layer=self.active_layer,
+                # boundary condition / state variables
+                H_SL=self._H_SL,
+                **rng_arrays,
+            )
+
+        # atomically publish the checkpoint: readers either see the fully
+        #   written new checkpoint or the previous one, never a partial file
+        os.replace(ckp_tmp_file, ckp_file)

@@ -105,6 +105,9 @@ target/
 # temp folder
 temp/
 
+# cobol kernel build artifacts
+pyDeltaRCM/lib/
+
 # benchmark harness results
 benchmarks/results/
 
