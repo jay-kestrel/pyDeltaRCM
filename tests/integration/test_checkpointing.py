@@ -886,6 +886,9 @@ class TestCheckpointFidelity:
         base_f.close()
         baseModel = DeltaModel(input_file=base_p)
         baseModel.update()
+        # finalize so the output netCDF is closed before the resume model
+        # renames it (open handles cannot be renamed on Windows)
+        baseModel.finalize()
 
         # rewrite the output netCDF with the meta group renamed
         file_path = os.path.join(baseModel.prefix, "pyDeltaRCM_output.nc")
