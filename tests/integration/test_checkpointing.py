@@ -489,6 +489,72 @@ class TestCheckpointingIntegrations:
         # close netcdf file
         out_fin.close()
 
+    def test_serial_resume_continues_rng_state(self, tmp_path: Path) -> None:
+        """Test that a serial resumed run continues the checkpointed RNG state.
+
+        A serial preprocessor job resuming from a checkpoint must continue
+        drawing random numbers from the state restored by
+        ``load_checkpoint``, not restart the draw sequence from the seed as
+        if the run had started from t=0. The parallel job path guards this
+        correctly; the serial path must too, or a resumed run silently
+        produces a different trajectory than the uninterrupted run.
+        """
+        # an uninterrupted reference run of 100 timesteps
+        p_long = utilities.yaml_from_dict(
+            tmp_path,
+            "long_run.yaml",
+            {"out_dir": tmp_path / "long", "seed": 8},
+        )
+        pp_long = preprocessor.Preprocessor(input_file=p_long, timesteps=100)
+        pp_long.run_jobs()
+        long_job = pp_long.job_list[0]
+        assert long_job.deltamodel._time == long_job.deltamodel._dt * 100
+
+        # an interrupted run of 50 timesteps, saving a checkpoint
+        p_base = utilities.yaml_from_dict(
+            tmp_path,
+            "base_run.yaml",
+            {"out_dir": tmp_path / "base", "seed": 8, "save_checkpoint": True},
+        )
+        pp_base = preprocessor.Preprocessor(input_file=p_base, timesteps=50)
+        pp_base.run_jobs()
+        base_job = pp_base.job_list[0]
+        ckp_file = os.path.join(base_job.deltamodel.prefix, "checkpoint.npz")
+        assert os.path.isfile(ckp_file)
+
+        # the checkpoint was written at the last checkpoint trigger of the
+        # interrupted run, so compute how many timesteps the resumed run
+        # needs to reach the same model time as the uninterrupted run
+        with np.load(ckp_file) as z:
+            ckp_time = float(z["time"])
+        _dt = base_job.deltamodel._dt
+        _rem = long_job.deltamodel._time - ckp_time
+        assert _rem > 0 and _rem % _dt == 0
+        nt_resume = int(_rem / _dt)
+
+        # a resumed run continuing from the checkpoint
+        p_resume = utilities.yaml_from_dict(
+            tmp_path,
+            "resume_run.yaml",
+            {"out_dir": tmp_path / "base", "seed": 8, "resume_checkpoint": True},
+        )
+        pp_resume = preprocessor.Preprocessor(
+            input_file=p_resume, timesteps=nt_resume
+        )
+        pp_resume.run_jobs()
+        resume_job = pp_resume.job_list[0]
+
+        # the resumed run must match the uninterrupted run at the same
+        # model time: the checkpointed random state was continued, not
+        # replayed from t=0
+        assert resume_job.deltamodel._time == long_job.deltamodel._time
+        assert np.all(resume_job.deltamodel.eta == long_job.deltamodel.eta)
+        assert np.all(resume_job.deltamodel.uw == long_job.deltamodel.uw)
+        assert np.all(resume_job.deltamodel.ux == long_job.deltamodel.ux)
+        assert np.all(resume_job.deltamodel.uy == long_job.deltamodel.uy)
+        assert np.all(resume_job.deltamodel.depth == long_job.deltamodel.depth)
+        assert np.all(resume_job.deltamodel.stage == long_job.deltamodel.stage)
+
 
 class TestCheckpointingCreatingLoading:
     def test_load_checkpoint_with_netcdf(self, tmp_path: Path) -> None:
