@@ -1,5 +1,7 @@
 # unit tests for iteration_tools.py
 
+# unit tests for iteration_tools.py
+
 import pytest
 from pathlib import Path
 
@@ -854,3 +856,150 @@ class TestCustomTimeVaryingMetaVar:
         vals = ds["auxdata"]["custom_tv_var"][:]
         assert np.all(np.diff(vals) > 0)
         ds.close()
+
+
+class TestComputeSandFrac:
+    """Direct unit coverage for ``compute_sand_frac``.
+
+    The method updates ``sand_frac`` from the erosion/deposition state of
+    the timestep: erosion below the active layer resets to the boundary
+    condition, erosion within the active layer adopts the active-layer
+    value, and deposition blends the active layer toward the deposit
+    mixture. These tests exercise each branch on a tiny model.
+    """
+
+    def _make_delta(self, tmp_path: Path, **kwargs) -> DeltaModel:
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"save_metadata": True, **kwargs}
+        )
+        return DeltaModel(input_file=p)
+
+    def test_no_erosion_or_deposition_leaves_sand_frac(self, tmp_path: Path) -> None:
+        _delta = self._make_delta(tmp_path, seed=0)
+
+        _delta.eta0[:] = -1.0
+        _delta.eta[:] = -1.0
+        _delta.sand_frac[:] = 0.42
+        _delta.active_layer[:] = 0.42
+        _delta.Vp_dep_sand[:] = 0.0
+        _delta.Vp_dep_mud[:] = 0.0
+
+        _delta.compute_sand_frac()
+
+        assert np.all(_delta.sand_frac == 0.42)
+        assert np.all(_delta.active_layer == 0.42)
+        _delta.output_netcdf.close()
+
+    def test_erosion_below_active_layer_resets_to_bc(self, tmp_path: Path) -> None:
+        _delta = self._make_delta(tmp_path, seed=0, sand_frac_bc=0.2)
+
+        # eta0 near the surface; erosion deep enough to cut below the
+        # active layer bottom (eta0 - active layer thickness)
+        _delta.eta0[:] = -1.0
+        _delta.eta[:] = -1.0 - _delta._active_layer_thickness - 1.0
+        _delta.sand_frac[:] = 0.9
+        _delta.active_layer[:] = 0.9
+        _delta.Vp_dep_sand[:] = 0.0
+        _delta.Vp_dep_mud[:] = 0.0
+
+        _delta.compute_sand_frac()
+
+        assert np.all(_delta.sand_frac == 0.2)
+        _delta.output_netcdf.close()
+
+    def test_erosion_within_active_layer_adopts_active_layer(
+        self, tmp_path: Path
+    ) -> None:
+        _delta = self._make_delta(tmp_path, seed=0)
+
+        _delta.eta0[:] = -1.0
+        # erode less than the active layer thickness
+        _delta.eta[:] = -1.0 - 0.5 * _delta._active_layer_thickness
+        _delta.sand_frac[:] = 0.9
+        _delta.active_layer[:] = 0.55
+        _delta.Vp_dep_sand[:] = 0.0
+        _delta.Vp_dep_mud[:] = 0.0
+
+        _delta.compute_sand_frac()
+
+        assert np.all(_delta.sand_frac == 0.55)
+        _delta.output_netcdf.close()
+
+    def test_mixed_deposition_sets_mixture(self, tmp_path: Path) -> None:
+        _delta = self._make_delta(tmp_path, seed=0)
+
+        _delta.eta0[:] = -1.0
+        _delta.eta[:] = -1.0  # no erosion
+        _delta.sand_frac[:] = 0.1
+        _delta.active_layer[:] = 0.1
+        _delta.Vp_dep_sand[:] = 0.25
+        _delta.Vp_dep_mud[:] = 0.75
+
+        _delta.compute_sand_frac()
+
+        expected = 0.25 / (0.25 + 0.75)
+        assert np.all(_delta.sand_frac == pytest.approx(expected))
+        assert np.all(_delta.active_layer == pytest.approx(expected))
+        _delta.output_netcdf.close()
+
+    def test_mud_only_deposition_above_epsilon_sets_mixture(
+        self, tmp_path: Path
+    ) -> None:
+        _delta = self._make_delta(tmp_path, seed=0)
+
+        _delta.eta0[:] = -1.0
+        _delta.eta[:] = -1.0
+        _delta.sand_frac[:] = 0.8
+        _delta.active_layer[:] = 0.8
+        _delta.Vp_dep_sand[:] = 0.0
+        _delta.Vp_dep_mud[:] = 0.01  # above the 1e-6 mud-deposition threshold
+
+        _delta.compute_sand_frac()
+
+        expected = 0.0 / (0.0 + 0.01)
+        assert np.all(_delta.sand_frac == pytest.approx(expected))
+        assert np.all(_delta.active_layer == pytest.approx(expected))
+        _delta.output_netcdf.close()
+
+    def test_trace_mud_deposition_below_epsilon_is_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        _delta = self._make_delta(tmp_path, seed=0)
+
+        _delta.eta0[:] = -1.0
+        _delta.eta[:] = -1.0
+        _delta.sand_frac[:] = 0.8
+        _delta.active_layer[:] = 0.8
+        _delta.Vp_dep_sand[:] = 0.0
+        _delta.Vp_dep_mud[:] = 1e-7  # below the 1e-6 threshold
+
+        _delta.compute_sand_frac()
+
+        assert np.all(_delta.sand_frac == 0.8)
+        assert np.all(_delta.active_layer == 0.8)
+        _delta.output_netcdf.close()
+
+    def test_erosion_and_deposition_branches_apply_cellwise(
+        self, tmp_path: Path
+    ) -> None:
+        _delta = self._make_delta(tmp_path, seed=0)
+
+        # column 0: deep erosion; column 1: deposition; column 2: untouched
+        _delta.eta0[:] = -1.0
+        _delta.eta[:, 0] = -1.0 - _delta._active_layer_thickness - 1.0
+        _delta.eta[:, 1] = -1.0
+        _delta.eta[:, 2] = -1.0
+        _delta.sand_frac[:] = 0.9
+        _delta.active_layer[:] = 0.9
+        _delta.Vp_dep_sand[:, 0] = 0.0
+        _delta.Vp_dep_mud[:, 0] = 0.0
+        _delta.Vp_dep_sand[:, 1] = 0.5
+        _delta.Vp_dep_mud[:, 1] = 0.5
+
+        _delta.compute_sand_frac()
+
+        assert np.all(_delta.sand_frac[:, 0] == _delta._sand_frac_bc)
+        assert np.all(_delta.sand_frac[:, 1] == pytest.approx(0.5))
+        assert np.all(_delta.sand_frac[:, 2] == 0.9)  # untouched column
+        _delta.output_netcdf.close()
+
