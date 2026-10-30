@@ -91,7 +91,7 @@ def compute_speed(
     steady = series[1:] if series.size > 1 else series
     return {
         "wall_init_s": float(wall_init_s),
-        "wall_first_step_s": float(series[0]),
+        "wall_first_step_s": float(series[0] / 1000.0),
         "wall_run_s": float(series.sum() / 1000.0),
         "wall_total_s": float(wall_total_s),
         "step_ms_median": float(np.median(steady)),
