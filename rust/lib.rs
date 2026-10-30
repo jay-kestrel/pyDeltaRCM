@@ -142,6 +142,19 @@ fn relocate(index: usize, fields: &Fields<'_>, config: &WaterConfig) -> usize {
     row as usize * fields.cols + col as usize
 }
 
+// NumPy flat indexing wraps negative inlet exits onto the opposite boundary.
+// Preserve the signed path entry (surface accumulation ignores nonpositives).
+fn wrap_index(index: i64, size: usize) -> Result<usize, String> {
+    if index < -(size as i64) || index as i128 >= size as i128 {
+        return Err("water parcel index outside NumPy flat-index range".into());
+    }
+    Ok(if index < 0 {
+        (size as i64 + index) as usize
+    } else {
+        index as usize
+    })
+}
+
 fn route(
     fields: &Fields<'_>,
     weights: &[f64],
@@ -180,15 +193,15 @@ fn route(
         })
         .collect();
     for step in 1..=config.stepmax {
-        if current.iter().all(|&index| index == 0) {
+        if current.iter().map(|&index| i128::from(index)).sum::<i128>() <= 0 {
             break;
         }
         if step >= out.columns {
             out.columns += (config.stepmax / 4).max(1);
         }
         for p in 0..count {
-            let index = current[p] as usize;
-            directions[p] = if index == 0 {
+            let index = wrap_index(current[p], size)?;
+            directions[p] = if current[p] == 0 {
                 4
             } else {
                 choose_direction(&weights[index * 9..index * 9 + 9], rng.random::<f64>())
@@ -199,8 +212,11 @@ fn route(
             } else {
                 current[p] + (d as i64 / 3 - 1) * fields.cols as i64 + d as i64 % 3 - 1
             };
-            if next[p] < 0 || next[p] as usize >= size {
-                return Err("water parcel stepped outside the grid; check boundary weights".into());
+            if next[p] < -(size as i64) || next[p] as i128 >= size as i128 {
+                return Err(format!(
+                    "water parcel stepped outside the grid: step={step}, parcel={p}, current={}, direction={d}, next={}; check boundary weights",
+                    current[p], next[p]
+                ));
             }
         }
         // Preserve the reference's accumulation order: all exits, then all entries.
@@ -209,7 +225,7 @@ fn route(
                 &mut out.qx,
                 &mut out.qy,
                 &mut out.qw,
-                current[p] as usize,
+                wrap_index(current[p], size)?,
                 directions[p],
                 amount,
             );
@@ -219,28 +235,30 @@ fn route(
                 &mut out.qx,
                 &mut out.qy,
                 &mut out.qw,
-                next[p] as usize,
+                wrap_index(next[p], size)?,
                 directions[p],
                 amount,
             );
         }
         for p in 0..count {
-            let mut index = next[p] as usize;
+            let mut raw_index = next[p];
+            let mut index = wrap_index(raw_index, size)?;
             let mut looped = false;
-            if step > config.l0 && index > 0 && seen[p].contains(&index) {
-                looped = (fields.stage[index] as f64 - config.sea_level).abs() >= 0.1;
+            if step > config.l0 && raw_index > 0 && seen[p].contains(&index) {
+                looped = (fields.stage[index] - config.sea_level as f32).abs() >= 0.1_f32;
                 index = relocate(index, fields, config);
+                raw_index = index as i64;
                 if looped {
                     out.flags[p] = 0;
                 }
             }
             let boundary = fields.cells[index] == -1;
-            let saved = if boundary && looped { 0 } else { index };
-            out.paths[p].push(saved as i64);
-            if saved > 0 && saved >= config.l0 * fields.cols {
-                seen[p].insert(saved);
+            let saved = if boundary && looped { 0 } else { raw_index };
+            out.paths[p].push(saved);
+            if saved > 0 && saved as usize >= config.l0 * fields.cols {
+                seen[p].insert(saved as usize);
             }
-            current[p] = if boundary { 0 } else { index as i64 };
+            current[p] = if boundary { 0 } else { raw_index };
             if boundary {
                 flux(
                     &mut out.qx,
