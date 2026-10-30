@@ -1,0 +1,4 @@
+# Byte-identical benchmark fixtures: the ports parse these files directly
+# and the parity gates digest them, so no platform may translate line
+# endings on checkout (see the dorado fixture PR for the same protection).
+bench/** -text
