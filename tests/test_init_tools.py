@@ -1684,3 +1684,76 @@ class TestTypeErrorMessages:
             TypeError, match=r"Input type was float, but needs to be int"
         ):
             DeltaModel(input_file=p)
+
+
+class TestOutDirInitializationOrdering:
+    """The ``out_dir`` kwarg must be honored before output infrastructure
+    (folders, log file, netCDF) is created.
+
+    ``import_files`` only *stores* kwargs; they are merged into the user
+    dict later, in ``process_input_to_model``. ``init_output_infrastructure``
+    runs first and reads ``out_dir`` only from the YAML user dict, so a
+    kwarg ``out_dir`` was silently ignored by the output infrastructure
+    while the final attribute reported the kwarg path. kwargs are
+    documented to supercede the YAML configuration.
+    """
+
+    def test_out_dir_kwarg_controls_output_location(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        yaml_out = tmp_path / "yaml_out"
+        kwarg_out = tmp_path / "kwarg_out"
+        p = utilities.yaml_from_dict(
+            tmp_path, "input.yaml", {"out_dir": yaml_out, "save_metadata": True})
+        # chdir so that a misplaced default out_dir would land in tmp_path
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.warns(UserWarning, match=r"A keyword .*out_dir.*"):
+            _delta = DeltaModel(input_file=p, out_dir=str(kwarg_out))
+
+        # the model both reports and *uses* the kwarg path
+        assert Path(_delta.prefix_abspath).resolve() == kwarg_out.resolve()
+        assert kwarg_out.is_dir()
+        # the netCDF lands under the kwarg path
+        assert (kwarg_out / "pyDeltaRCM_output.nc").is_file()
+        # the log file lands under the kwarg path
+        assert len(list(kwarg_out.glob("pyDeltaRCM_*.log"))) == 1
+        # nothing was written to the misplaced default CWD directory
+        assert not (tmp_path / "deltaRCM_Output").exists()
+        # the kwarg supercedes the YAML specification: that path is unused
+        assert not yaml_out.exists()
+
+    def test_out_dir_default_unchanged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # no out_dir in the YAML and no kwarg: default behavior must apply
+        file_name = "user_parameters.yaml"
+        p, f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(f, "Length", 10.0)
+        utilities.write_parameter_to_file(f, "save_metadata", True)
+        utilities.write_parameter_to_file(f, "Width", 10.0)
+        utilities.write_parameter_to_file(f, "seed", 0)
+        utilities.write_parameter_to_file(f, "dx", 1.0)
+        utilities.write_parameter_to_file(f, "L0_meters", 1.0)
+        utilities.write_parameter_to_file(f, "S0", 0.0002)
+        utilities.write_parameter_to_file(f, "itermax", 1)
+        utilities.write_parameter_to_file(f, "Np_water", 10)
+        utilities.write_parameter_to_file(f, "u0", 1.0)
+        utilities.write_parameter_to_file(f, "N0_meters", 2.0)
+        utilities.write_parameter_to_file(f, "h0", 1.0)
+        utilities.write_parameter_to_file(f, "H_SL", 0.0)
+        utilities.write_parameter_to_file(f, "SLR", 0.001)
+        utilities.write_parameter_to_file(f, "Np_sed", 10)
+        utilities.write_parameter_to_file(f, "f_bedload", 0.5)
+        utilities.write_parameter_to_file(f, "C0_percent", 0.1)
+        f.close()
+        monkeypatch.chdir(tmp_path)
+
+        _delta = DeltaModel(input_file=p)
+
+        assert _delta.out_dir == "deltaRCM_Output"
+        default_dir = tmp_path / "deltaRCM_Output"
+        assert Path(_delta.prefix_abspath).resolve() == default_dir.resolve()
+        assert default_dir.is_dir()
+        assert (default_dir / "pyDeltaRCM_output.nc").is_file()
+        assert len(list(default_dir.glob("pyDeltaRCM_*.log"))) == 1
