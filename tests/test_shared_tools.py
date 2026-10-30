@@ -404,3 +404,30 @@ class TestRandomPickDegenerate:
         arbitrary index."""
         with pytest.raises(ValueError, match="positive total"):
             shared_tools.random_pick(np.full(9, np.nan))
+
+
+class TestCustomUnravelBounds:
+    """Regression tests: out-of-range flat indices must raise, not wrap.
+
+    ``custom_unravel`` only rejected indices *greater* than the array
+    size, so negative indices silently unraveled to negative coordinates
+    (e.g., ``custom_unravel(-7, (10, 20)) == (-1, 13)``), and the
+    boundary value ``i == L * W`` passed. Downstream numba indexing with
+    those coordinates silently wraps writes onto the wrong cells -- for a
+    ``px == -1``, the outflow row.
+    """
+
+    def test_negative_index_raises(self) -> None:
+        with pytest.raises(IndexError):
+            shared_tools.custom_unravel(-7, (10, 20))
+
+    def test_boundary_index_raises(self) -> None:
+        # i == L * W is one past the last valid flat index
+        with pytest.raises(IndexError):
+            shared_tools.custom_unravel(200, (10, 20))
+
+    def test_valid_indices_unchanged(self) -> None:
+        # corners and a known interior value (matches the doctest)
+        assert shared_tools.custom_unravel(0, (10, 20)) == (0, 0)
+        assert shared_tools.custom_unravel(199, (10, 20)) == (9, 19)
+        assert shared_tools.custom_unravel(5124, (100, 200)) == (25, 124)

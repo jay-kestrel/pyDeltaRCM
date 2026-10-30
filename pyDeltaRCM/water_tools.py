@@ -1020,10 +1020,15 @@ def _check_for_loops(
                         px = px0 + int(np.round(Fx / Fw * 5.0))
                         py = py0 + int(np.round(Fy / Fw * 5.0))
                     else:
-                        # degenerate transport vector (parcel looping exactly
-                        #   at the inlet center): leave in place rather than
-                        #   relying on the previous iteration's px, py
-                        px, py = px0, py0
+                        # mean-transport vector is zero (the loop was
+                        # detected at the vector origin (1, CTR)):
+                        # relocate one row downstream of the loop cell.
+                        # Without this branch, px/py are never assigned
+                        # and numba's zero-initialization feeds (0, 0)
+                        # into the clamps below, teleporting the parcel
+                        # to (L0, 1), the top-left working cell.
+                        px = px0 + 1
+                        py = py0
 
                     # limit the new px and py to beyond the inlet, and
                     #   away from domain edges

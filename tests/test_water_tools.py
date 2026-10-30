@@ -462,3 +462,64 @@ class TestInjectInletDischarge:
         assert qxn.flat[5] == 3
         assert qxn.flat[6] == 1
         assert np.all(qyn == 0)
+
+
+class TestCheckForLoopsFwZero:
+    """Regression test: loop relocation is defined when Fw == 0.
+
+    ``_check_for_loops`` relocates a looped parcel along its mean-transport
+    vector, computing ``px``/``py`` only inside ``if Fw != 0:``. When the
+    loop is detected exactly at the vector origin (``(1, CTR)``), those
+    locals are never assigned; numba's zero-initialization then fed
+    ``(0, 0)`` into the clamps, teleporting the parcel to ``(L0, 1)`` --
+    the top-left working cell -- instead of a location related to the loop.
+    """
+
+    _L = 10
+    _W = 20
+    _CTR = 10
+    _L0 = 1
+
+    def _run_check(self, new_ind: int, walk: list) -> tuple:
+        # stage everywhere 1.0 (|stage| > 0.1, so the parcel is
+        # disqualified from the free surface, as looped parcels are)
+        stage_above_SL = np.ones((self._L, self._W), dtype=np.float64)
+        free_surf_walk_inds = np.array([walk], dtype=np.int64)
+        new_inds = np.array([new_ind], dtype=np.int64)
+
+        out_inds, out_looped = water_tools._check_for_loops(
+            free_surf_walk_inds,
+            new_inds,
+            2,  # _step > L0 so the loop check is active
+            self._L0,
+            self._CTR,
+            stage_above_SL,
+        )
+        return out_inds, out_looped
+
+    def test_relocation_defined_when_fw_is_zero(self) -> None:
+        # loop detected at the mean-transport vector origin (1, CTR):
+        # Fx = 0 and Fy = 0, so Fw == 0
+        loop_ind = 1 * self._W + self._CTR
+        walk = [loop_ind, 0, loop_ind, 0, 0]
+
+        out_inds, out_looped = self._run_check(loop_ind, walk)
+
+        # relocated one row downstream of the loop cell -- NOT to the
+        # zero-initialization artifact (L0, 1), raveled as 1 * 20 + 1 = 21
+        assert out_inds[0] == 2 * self._W + self._CTR
+        assert out_inds[0] != self._L0 * self._W + 1
+        # looped parcels are still disqualified from the free surface
+        assert out_looped[0] == 1
+
+    def test_relocation_along_vector_unchanged_when_fw_positive(self) -> None:
+        # control: a loop at (2, CTR) has Fx = 1, Fy = 0, Fw = 1, and the
+        # relocation along the mean-transport vector is unchanged
+        loop_ind = 2 * self._W + self._CTR
+        walk = [loop_ind, 0, loop_ind, 0, 0]
+
+        out_inds, out_looped = self._run_check(loop_ind, walk)
+
+        # px = 2 + round(1/1 * 5) = 7, py = CTR; both within the clamps
+        assert out_inds[0] == 7 * self._W + self._CTR
+        assert out_looped[0] == 1
