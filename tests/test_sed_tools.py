@@ -201,6 +201,47 @@ class TestGetWeightAtCellSedimentFallback:
         assert np.any(weights[0:3] > 0)
         assert weights.sum() == pytest.approx(1.0)
 
+    def test_route_sand_parcels_flux_never_reaches_outflow_row(
+        self, tmp_path: Path
+    ) -> None:
+        # 20x10 domain with stepmax 5: no parcel can legitimately reach
+        # the outflow row (row 19) -- walking covers at most 5 rows from
+        # the inlet and sediment routing has no relocation jumps -- so
+        # any flux or bed update there is the negative-index wrap.
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {
+                "Length": 20.0,
+                "Width": 10.0,
+                "dx": 1.0,
+                "L0_meters": 1.0,
+                "N0_meters": 2.0,
+                "h0": 1.0,
+                "Np_sed": 100,
+                "f_bedload": 0.5,
+                "itermax": 1,
+                "seed": 1,  # verified to route a parcel into the ghost cell
+                "stepmax": 5,
+                "verbose": 0,
+            },
+        )
+        delta = DeltaModel(input_file=p)
+        delta.log_info = mock.MagicMock()
+
+        delta.init_sediment_iteration()
+        eta_outflow_before = delta.eta[-1, :].copy()
+
+        # aggrade-dry the channel entrance
+        cols = delta.inlet
+        delta.depth[0:3, cols[0] - 1 : cols[-1] + 2] = 0
+
+        delta.route_all_sand_parcels()
+
+        # no sediment flux may be written on the outflow row
+        assert np.all(delta.qs[-1, :] == 0)
+        # and the outflow-row bed must be untouched by routing
+        assert np.all(delta.eta[-1, :] == eta_outflow_before)
 
 
 class TestParcelSupplySplit:
