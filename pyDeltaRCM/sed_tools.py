@@ -290,6 +290,14 @@ def _get_weight_at_cell_sediment(
         # disallow movement into walls
         weight[wall] = 0
 
+        # disallow movement into the padded ghost cells above row 0:
+        # they replicate the row-0 cell's own type and so pass the wall
+        # mask, but stepping into them leaves the domain (px == -1, and
+        # the negative row index then wraps every later write onto the
+        # outflow row)
+        if ind[0] == 0:
+            weight[:3] = 0
+
     weight[ctr] = 0  # enforce
 
     # sanity check
