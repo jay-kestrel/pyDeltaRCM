@@ -73,4 +73,5 @@ Developer documentation
    :maxdepth: 3
 
    guides/developer_guide
+   guides/benchmarking
    reference/index
