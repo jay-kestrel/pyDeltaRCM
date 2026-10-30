@@ -709,6 +709,13 @@ def _get_weight_at_cell_water(
                         "No non-wall cells surrounding cell."
                         "Please report error including logfile."
                     )
+                # exclude the padded ghost cells above row 0: they
+                # replicate the row-0 cell's own type and so pass the
+                # wall mask, but stepping into them leaves the domain
+                # (px == -1, and the negative index then wraps every
+                # later flux write onto the outflow row)
+                if ind[0] == 0:
+                    weight[:3] = 0
 
             weight = weight / np.sum(weight)
 
