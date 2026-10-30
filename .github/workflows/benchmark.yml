@@ -6,62 +6,123 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Org policy: no external GitHub Actions (no `uses:` steps). Checkout, the
+# Rust toolchain, and Python (via uv) are provisioned inline, following the
+# same pattern as julia.yml.
+
+permissions:
+  contents: read
+
 jobs:
 
   benchmark-smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.13'
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
+      shell: bash
+      run: |
+        REPO_URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+        SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+        git clone --quiet "$REPO_URL" .
+        git fetch --quiet --depth 1 origin "$SHA"
+        git checkout --quiet --detach "$SHA"
+
+    - name: Ensure Rust toolchain
+      shell: bash
+      run: |
+        if ! command -v cargo > /dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+        cargo --version
+
+    - name: Set up Python 3.13 via uv
+      shell: bash
+      run: |
+        HOST_PY=python3
+        command -v python3 > /dev/null 2>&1 || HOST_PY=python
+        "$HOST_PY" -m pip install --quiet uv
+        "$HOST_PY" -m uv python install 3.13
+        "$HOST_PY" -m uv venv --python 3.13 .venv
+        if [ -x .venv/bin/python ]; then VIRTUAL_PY="$(pwd)/.venv/bin/python"; else VIRTUAL_PY="$(pwd)/.venv/Scripts/python.exe"; fi
+        echo "VIRTUAL_PY=$VIRTUAL_PY" >> "$GITHUB_ENV"
+
     - name: Install dependencies
+      shell: bash
       run: |
-        python -m pip install --upgrade pip
-        pip install setuptools
-        pip install -r requirements.txt
+        "$VIRTUAL_PY" -m pip install --upgrade pip setuptools
+        "$VIRTUAL_PY" -m pip install -r requirements.txt
+
     - name: Install pyDeltaRCM
+      shell: bash
       run: |
-        pip install -e .
+        "$VIRTUAL_PY" -m pip install -e .
+
     - name: Run benchmark smoke
+      shell: bash
       run: |
-        python benchmarks/benchmark_timestep.py --smoke --output-dir benchmarks/results
-    - name: Upload benchmark smoke results
-      uses: actions/upload-artifact@v7
-      with:
-        name: benchmark-smoke-results
-        path: benchmarks/results/
+        "$VIRTUAL_PY" benchmarks/benchmark_timestep.py --smoke --output-dir benchmarks/results
+
+    - name: List benchmark smoke results
+      # artifact upload replaced with a log listing (no external actions)
+      shell: bash
+      run: |
+        find benchmarks/results -type f -print | head -20
 
   fixture-parity:
     # Gate the normalized fixtures and the Python reference runner:
     # fixture byte-stability, manifest completeness, and the golden eta
     # reproduction that the C/Rust ports will be held to.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
-    - name: Set up Python
-      uses: actions/setup-python@v7
-      with:
-        python-version: '3.13'
+      shell: bash
+      run: |
+        REPO_URL="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+        SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+        git clone --quiet "$REPO_URL" .
+        git fetch --quiet --depth 1 origin "$SHA"
+        git checkout --quiet --detach "$SHA"
+
+    - name: Ensure Rust toolchain
+      shell: bash
+      run: |
+        if ! command -v cargo > /dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+        cargo --version
+
+    - name: Set up Python 3.13 via uv
+      shell: bash
+      run: |
+        HOST_PY=python3
+        command -v python3 > /dev/null 2>&1 || HOST_PY=python
+        "$HOST_PY" -m pip install --quiet uv
+        "$HOST_PY" -m uv python install 3.13
+        "$HOST_PY" -m uv venv --python 3.13 .venv
+        if [ -x .venv/bin/python ]; then VIRTUAL_PY="$(pwd)/.venv/bin/python"; else VIRTUAL_PY="$(pwd)/.venv/Scripts/python.exe"; fi
+        echo "VIRTUAL_PY=$VIRTUAL_PY" >> "$GITHUB_ENV"
+
     - name: Install dependencies
+      shell: bash
       run: |
-        python -m pip install --upgrade pip
-        pip install setuptools
-        pip install -r requirements.txt
+        "$VIRTUAL_PY" -m pip install --upgrade pip setuptools
+        "$VIRTUAL_PY" -m pip install -r requirements.txt
+
     - name: Install pyDeltaRCM
+      shell: bash
       run: |
-        pip install .
+        "$VIRTUAL_PY" -m pip install .
+
     - name: Run fixture and reference parity tests
+      shell: bash
       run: |
-        python -m pytest tests/test_benchmark_fixtures.py tests/test_benchmark_reference.py -v
-    - name: Upload parity results
-      uses: actions/upload-artifact@v7
-      with:
-        name: fixture-parity-results
-        path: benchmarks/results/
-      if: always()
+        "$VIRTUAL_PY" -m pytest tests/test_benchmark_fixtures.py tests/test_benchmark_reference.py -v
+
+    - name: List parity results
+      shell: bash
+      run: |
+        find benchmarks/results -type f -print | head -20
