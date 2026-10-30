@@ -1005,3 +1005,119 @@ class TestCheckpointingCreatingLoading:
 
         # the counter survives the save-load round trip exactly
         assert _resume._save_time_since_checkpoint == 1234.5
+
+    def _rewrite_netcdf_group(self, prefix: Path, new_group_name: str) -> None:
+        """Rewrite the output netCDF with its group renamed.
+
+        The copy mirrors the dims/vars/groups copy performed by
+        ``load_checkpoint``, so the rewritten file remains a valid output
+        file for resuming.
+        """
+        nc_path = os.path.join(prefix, "pyDeltaRCM_output.nc")
+        assert os.path.isfile(nc_path)
+        tmp_nc = os.path.join(prefix, "rewritten.nc")
+        with Dataset(nc_path, "r") as src, Dataset(
+            tmp_nc, "w", format="NETCDF4"
+        ) as dst:
+            # copy attributes
+            for name in src.ncattrs():
+                dst.setncattr(name, src.getncattr(name))
+            # copy dimensions
+            for name, dimension in src.dimensions.items():
+                if dimension.isunlimited():
+                    dst.createDimension(name, None)
+                else:
+                    dst.createDimension(name, len(dimension))
+            # copy root variables
+            for name, variable in src.variables.items():
+                dst.createVariable(name, variable.datatype, variable.dimensions)
+                dst.variables[name][:] = src.variables[name][:]
+            # copy groups under the new name; with new_group_name None,
+            #   skip group copying entirely, producing a file with no
+            #   groups at all
+            if new_group_name is not None:
+                for name in src.groups.keys():
+                    dst.createGroup(new_group_name)
+                    for vname, variable in src.groups[name].variables.items():
+                        dst.groups[new_group_name].createVariable(
+                            vname, variable.datatype, variable.dimensions
+                        )
+                        dst.groups[new_group_name].variables[vname][:] = src.groups[
+                            name
+                        ].variables[vname][:]
+        os.replace(tmp_nc, nc_path)
+
+    def test_load_checkpoint_subgroup_fallback(self, tmp_path: Path) -> None:
+        """Test resuming against an output file without meta/auxdata groups.
+
+        The subgroup name fallback must resolve the first group of the
+        file (e.g., for a file written by a subclass with a custom
+        subgroup name) instead of raising a TypeError by subscripting the
+        ``dict_keys`` view.
+        """
+        # base run with a netCDF output and a checkpoint
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"save_checkpoint": True, "save_eta_grids": True},
+        )
+        _delta = DeltaModel(input_file=p)
+        _delta._save_time_since_checkpoint = float("inf")
+        _delta.output_checkpoint()  # force a checkpoint
+        _delta.finalize()
+
+        # rewrite the output file with a custom group name, so the
+        #   resumed model must fall back to the first group
+        self._rewrite_netcdf_group(_delta.prefix, "customgroup")
+
+        # resume from the checkpoint
+        p_resume = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {
+                "save_checkpoint": False,
+                "save_eta_grids": True,
+                "resume_checkpoint": True,
+            },
+        )
+        _resume = DeltaModel(input_file=p_resume)
+
+        # the subgroup name falls back to the first group of the file
+        assert _resume._subgroup_name == "customgroup"
+        _resume.finalize()
+
+    def test_load_checkpoint_no_groups_raises_clear_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Test resuming against an output file with no groups at all.
+
+        The subgroup name fallback must raise a clear error for a file
+        with no groups, rather than a TypeError from subscripting the
+        ``dict_keys`` view.
+        """
+        # base run with a netCDF output and a checkpoint
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"save_checkpoint": True, "save_eta_grids": True},
+        )
+        _delta = DeltaModel(input_file=p)
+        _delta._save_time_since_checkpoint = float("inf")
+        _delta.output_checkpoint()  # force a checkpoint
+        _delta.finalize()
+
+        # rewrite the output file with no groups at all
+        self._rewrite_netcdf_group(_delta.prefix, None)
+
+        # resume from the checkpoint raises a clear error
+        p_resume = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {
+                "save_checkpoint": False,
+                "save_eta_grids": True,
+                "resume_checkpoint": True,
+            },
+        )
+        with pytest.raises(RuntimeError, match="no groups"):
+            _ = DeltaModel(input_file=p_resume)
