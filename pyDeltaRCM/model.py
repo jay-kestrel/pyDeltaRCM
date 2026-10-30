@@ -247,6 +247,13 @@ class DeltaModel(
             #   stay unfinalized so the close can be retried
             raise
 
+        # release the per-run log file handler so long-lived embedding
+        # processes do not accumulate open handles
+        if getattr(self, "_log_fh", None) is not None:
+            self.logger.removeHandler(self._log_fh)
+            self._log_fh.close()
+            self._log_fh = None
+
         self._is_finalized = True
 
     @property
