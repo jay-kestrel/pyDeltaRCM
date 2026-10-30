@@ -3,7 +3,13 @@
 import numpy as np
 import pytest
 
-from pyDeltaRCM import DeltaModel, _native, native_water, shared_tools, water_tools
+from pyDeltaRCM import (
+    DeltaModel,
+    _native,
+    native_water,
+    shared_tools,
+    water_tools,
+)
 
 
 @pytest.fixture
@@ -29,7 +35,9 @@ def model(tmp_path):
 
 @pytest.mark.parametrize("sea_level", [0.0, 0.25])
 @pytest.mark.parametrize("evolved", [False, True])
-def test_surface_kernels_equal_reference_on_identical_walks(model, sea_level, evolved):
+def test_surface_kernels_equal_reference_on_identical_walks(
+    model, sea_level, evolved
+):
     if evolved:
         rng = np.random.default_rng(42)
         for name in ("uw", "ux", "uy", "depth"):
@@ -84,11 +92,15 @@ def test_forced_walks_and_flux_are_exact(model, monkeypatch, direction, loop):
     result = _native.water_phase(*native_water.phase_inputs(model), 101)
     model.run_water_iteration()
     for name in ("qxn", "qyn", "qwn", "free_surf_walk_inds", "free_surf_flag"):
-        np.testing.assert_array_equal(result[name], getattr(model, name), err_msg=name)
+        np.testing.assert_array_equal(
+            result[name], getattr(model, name), err_msg=name
+        )
 
 
 @pytest.mark.parametrize("count", [1, 2, 20])
-def test_duplicate_inlet_parcels_contribute_all_discharge(model, monkeypatch, count):
+def test_duplicate_inlet_parcels_contribute_all_discharge(
+    model, monkeypatch, count
+):
     """#10 accumulates ghost-node flux for every parcel, not unique starts."""
     model._stepmax = 0  # isolate the inlet injection from subsequent steps
     start = int(model.inlet[0])
@@ -133,7 +145,14 @@ def test_checkpoint_stream_replays_native_phase(model):
     stage = model.stage.copy()
     state = shared_tools.get_random_state()
     native_water.run_water_phase(model)
-    names = ("free_surf_walk_inds", "free_surf_flag", "qxn", "qyn", "qwn", "Hnew")
+    names = (
+        "free_surf_walk_inds",
+        "free_surf_flag",
+        "qxn",
+        "qyn",
+        "qwn",
+        "Hnew",
+    )
     expected = {name: getattr(model, name).copy() for name in names}
     expected_state = shared_tools.get_random_state()
     model.stage = stage
@@ -166,9 +185,12 @@ def test_dispatch_and_reference_switch(model, monkeypatch):
         "hook_run_water_iteration",
         "hook_init_water_iteration",
         "init_water_iteration",
+        "get_water_weight_array",
     ],
 )
-def test_overridden_phase_methods_keep_python_semantics(model, monkeypatch, name):
+def test_overridden_phase_methods_keep_python_semantics(
+    model, monkeypatch, name
+):
     monkeypatch.setenv("PYDELTARCM_NATIVE", "1")
     monkeypatch.setattr(model, name, lambda *args: None)
     assert not native_water.can_use_native(model)
@@ -177,6 +199,35 @@ def test_overridden_phase_methods_keep_python_semantics(model, monkeypatch, name
 @pytest.mark.parametrize("field", native_water.FLOAT_FIELDS)
 def test_custom_precision_uses_reference(model, monkeypatch, field):
     monkeypatch.setenv("PYDELTARCM_NATIVE", "1")
+    setattr(model, field, getattr(model, field).astype(np.float64))
+    assert not native_water.can_use_native(model)
+
+
+def test_fused_weights_preserve_the_entire_phase(model):
+    expected = _native.water_phase(*native_water.phase_inputs(model), 918)
+    actual = _native.water_phase(
+        *native_water.phase_inputs(model, construct_weights=True),
+        918,
+        weight_inputs=native_water.weight_inputs(model),
+    )
+    for name in expected:
+        np.testing.assert_array_equal(
+            actual[name], expected[name], err_msg=name
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "qx",
+        "qy",
+        "mod_water_weight",
+        "ivec_flat",
+        "jvec_flat",
+        "distances_flat",
+    ],
+)
+def test_custom_weight_precision_uses_reference(model, field):
     setattr(model, field, getattr(model, field).astype(np.float64))
     assert not native_water.can_use_native(model)
 

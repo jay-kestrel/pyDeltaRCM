@@ -22,9 +22,15 @@ def inputs(case):
     cells = np.zeros(shape, dtype=np.int64)
     qx = rng.uniform(-1, 1, shape).astype(np.float32)
     qy = rng.uniform(-1, 1, shape).astype(np.float32)
-    distances = np.array([2**0.5, 1, 2**0.5, 1, 1, 1, 2**0.5, 1, 2**0.5], dtype=np.float32)
-    ivec = np.array([-1, 0, 1, -1, 0, 1, -1, 0, 1], dtype=np.float32) / distances
-    jvec = np.array([-1, -1, -1, 0, 0, 0, 1, 1, 1], dtype=np.float32) / distances
+    distances = np.array(
+        [2**0.5, 1, 2**0.5, 1, 1, 1, 2**0.5, 1, 2**0.5], dtype=np.float32
+    )
+    ivec = (
+        np.array([-1, 0, 1, -1, 0, 1, -1, 0, 1], dtype=np.float32) / distances
+    )
+    jvec = (
+        np.array([-1, -1, -1, 0, 0, 0, 1, 1, 1], dtype=np.float32) / distances
+    )
     if case in ("zero", "dry", "wall", "isolated"):
         stage.fill(0)
         qx.fill(0)
@@ -39,14 +45,49 @@ def inputs(case):
     if case == "isolated":
         cells.fill(-2)
         cells[2, 2] = 0
-    return [depth, stage, modifier, cells, qx, qy, ivec, jvec, distances, 0.1, 0.0014715, 1.0]
+    return [
+        depth,
+        stage,
+        modifier,
+        cells,
+        qx,
+        qy,
+        ivec,
+        jvec,
+        distances,
+        0.1,
+        0.0014715,
+        1.0,
+    ]
 
 
 def native_weights(args):
-    depth, stage, modifier, cells, qx, qy, ivec, jvec, distances, dry, gamma, theta = args
+    (
+        depth,
+        stage,
+        modifier,
+        cells,
+        qx,
+        qy,
+        ivec,
+        jvec,
+        distances,
+        dry,
+        gamma,
+        theta,
+    ) = args
     return _native.water_weights(
-        depth, stage, (depth * modifier) ** theta, cells, qx, qy,
-        ivec, jvec, distances, dry, gamma,
+        depth,
+        stage,
+        (depth * modifier) ** theta,
+        cells,
+        qx,
+        qy,
+        ivec,
+        jvec,
+        distances,
+        dry,
+        gamma,
     )
 
 
@@ -59,7 +100,9 @@ def test_weight_array_is_bit_exact(case, theta):
     before = [arg.copy() for arg in args[:9]]
     actual = native_weights(args)
     assert actual.dtype == np.float64
-    np.testing.assert_array_equal(actual.view(np.uint64), expected.view(np.uint64))
+    np.testing.assert_array_equal(
+        actual.view(np.uint64), expected.view(np.uint64)
+    )
     for arg, saved in zip(args[:9], before):
         np.testing.assert_array_equal(arg, saved)
 
@@ -69,7 +112,9 @@ def test_zero_weight_boundary_fallback_contract():
     expected = water_tools._get_water_weight_array(*args)
     np.testing.assert_array_equal(expected[0, 0, :3], [0, 0, 0])
     assert expected[0, 0, 4] == 0
-    np.testing.assert_array_equal(expected[0, 0, [3, 5, 6, 7, 8]], np.full(5, np.float32(0.2)))
+    np.testing.assert_array_equal(
+        expected[0, 0, [3, 5, 6, 7, 8]], np.full(5, np.float32(0.2))
+    )
     np.testing.assert_array_equal(native_weights(args), expected)
 
 

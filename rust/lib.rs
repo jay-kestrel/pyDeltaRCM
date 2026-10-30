@@ -371,11 +371,191 @@ fn smooth(input: &[f32], fields: &Fields<'_>, config: &WaterConfig) -> Vec<f32> 
     result
 }
 
+// NumPy's contiguous nine-element float32 reduction uses this pairwise tree.
+fn sum_nine(a: &[f32; 9]) -> f32 {
+    (((a[0] + a[1]) + (a[2] + a[3])) + ((a[4] + a[5]) + (a[6] + a[7]))) + a[8]
+}
+
+type WeightInputs<'py> = (
+    PyReadonlyArray2<'py, f32>,
+    PyReadonlyArray2<'py, f32>,
+    PyReadonlyArray2<'py, f32>,
+    PyReadonlyArray1<'py, f32>,
+    PyReadonlyArray1<'py, f32>,
+    PyReadonlyArray1<'py, f32>,
+    f64,
+    f64,
+);
+
+#[allow(clippy::too_many_arguments)]
+fn construct_water_weights(
+    depth: &PyReadonlyArray2<'_, f32>,
+    stage: &PyReadonlyArray2<'_, f32>,
+    factor: &PyReadonlyArray2<'_, f32>,
+    cells: &PyReadonlyArray2<'_, i64>,
+    qx: &PyReadonlyArray2<'_, f32>,
+    qy: &PyReadonlyArray2<'_, f32>,
+    ivec: &PyReadonlyArray1<'_, f32>,
+    jvec: &PyReadonlyArray1<'_, f32>,
+    distances: &PyReadonlyArray1<'_, f32>,
+    dry_depth: f64,
+    gamma: f64,
+) -> PyResult<Vec<f64>> {
+    use pyo3::exceptions::PyRuntimeError;
+    let shape = depth.shape();
+    let (rows, cols) = (shape[0], shape[1]);
+    if rows == 0
+        || cols == 0
+        || [
+            stage.shape(),
+            factor.shape(),
+            cells.shape(),
+            qx.shape(),
+            qy.shape(),
+        ]
+        .iter()
+        .any(|s| *s != shape)
+        || [ivec.len(), jvec.len(), distances.len()]
+            .iter()
+            .any(|&n| n != 9)
+        || !dry_depth.is_finite()
+        || !gamma.is_finite()
+    {
+        return Err(PyValueError::new_err("invalid water-weight inputs"));
+    }
+    let (depth, stage, factor, cells, qx, qy, ivec, jvec, distances) = (
+        depth.as_slice()?,
+        stage.as_slice()?,
+        factor.as_slice()?,
+        cells.as_slice()?,
+        qx.as_slice()?,
+        qy.as_slice()?,
+        ivec.as_slice()?,
+        jvec.as_slice()?,
+        distances.as_slice()?,
+    );
+    if [depth, stage, factor, qx, qy, ivec, jvec, distances]
+        .iter()
+        .any(|v| v.iter().any(|x| !x.is_finite()))
+        || depth.iter().any(|&x| x < 0.0)
+        || factor.iter().any(|&x| x < 0.0)
+        || distances.iter().any(|&x| x <= 0.0)
+    {
+        return Err(PyValueError::new_err("water-weight fields must be finite with nonnegative depth/factor and positive distances"));
+    }
+    let mut output = Vec::with_capacity(rows * cols * 9);
+    for index in 0..rows * cols {
+        let (row, col) = (index / cols, index % cols);
+        let mut surface = [0.0_f32; 9];
+        let mut inertia = [0.0_f32; 9];
+        let mut weights = [0.0_f32; 9];
+        let mut dry = [false; 9];
+        let mut wall = [false; 9];
+        let mut invalid = [false; 9];
+        let mut neighbors = [0; 9];
+        for k in 0..9 {
+            let r = (row as isize + (k / 3) as isize - 1).clamp(0, rows as isize - 1) as usize;
+            let c = (col as isize + (k % 3) as isize - 1).clamp(0, cols as isize - 1) as usize;
+            let neighbor = r * cols + c;
+            neighbors[k] = neighbor;
+            dry[k] = depth[neighbor] < dry_depth as f32;
+            wall[k] = cells[neighbor] == -2;
+            invalid[k] = wall[k] || k == 4 || (row == 0 && k < 3);
+            if !dry[k] && !wall[k] && k != 4 {
+                surface[k] = ((stage[index] - stage[neighbor]) / distances[k]).max(0.0);
+                inertia[k] = ((qx[index] * jvec[k] + qy[index] * ivec[k]) / distances[k]).max(0.0);
+            }
+        }
+        let surface_sum = sum_nine(&surface);
+        let inertia_sum = sum_nine(&inertia);
+        for k in 0..9 {
+            if surface_sum > 0.0 {
+                surface[k] /= surface_sum;
+            }
+            if inertia_sum > 0.0 {
+                inertia[k] /= inertia_sum;
+            }
+            weights[k] = factor[neighbors[k]]
+                * (gamma as f32 * surface[k] + (1.0 - gamma) as f32 * inertia[k]);
+        }
+        weights[4] = 0.0;
+        let total = sum_nine(&weights);
+        if total > 0.0 {
+            for weight in &mut weights {
+                *weight /= total;
+            }
+        } else if total == 0.0 {
+            weights.fill(0.0);
+            if !wall[4] {
+                let wet_count = (0..9).filter(|&k| !dry[k] && !invalid[k]).count();
+                let valid_count = (0..9).filter(|&k| !wall[k] && !invalid[k]).count();
+                let count = if wet_count > 0 {
+                    wet_count
+                } else {
+                    valid_count
+                };
+                if count == 0 {
+                    return Err(PyRuntimeError::new_err(
+                        "No non-wall cells surrounding cell.Please report error including logfile.",
+                    ));
+                }
+                for k in 0..9 {
+                    if !invalid[k] && (wet_count == 0 || !dry[k]) {
+                        weights[k] = (1.0_f64 / count as f64) as f32;
+                    }
+                }
+                let total = sum_nine(&weights);
+                for weight in &mut weights {
+                    *weight /= total;
+                }
+            }
+        } else {
+            return Err(PyRuntimeError::new_err(
+                "Water sum(weight) less than 0. Check gamma.",
+            ));
+        }
+        if weights.iter().any(|w| !w.is_finite()) {
+            return Err(PyRuntimeError::new_err(
+                "NaN encountered in return from water weighting.",
+            ));
+        }
+        output.extend(weights.map(f64::from));
+    }
+    Ok(output)
+}
+
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn water_weights<'py>(
+    py: Python<'py>,
+    depth: PyReadonlyArray2<'py, f32>,
+    stage: PyReadonlyArray2<'py, f32>,
+    factor: PyReadonlyArray2<'py, f32>,
+    cells: PyReadonlyArray2<'py, i64>,
+    qx: PyReadonlyArray2<'py, f32>,
+    qy: PyReadonlyArray2<'py, f32>,
+    ivec: PyReadonlyArray1<'py, f32>,
+    jvec: PyReadonlyArray1<'py, f32>,
+    distances: PyReadonlyArray1<'py, f32>,
+    dry_depth: f64,
+    gamma: f64,
+) -> PyResult<Bound<'py, numpy::PyArray3<f64>>> {
+    let data = construct_water_weights(
+        &depth, &stage, &factor, &cells, &qx, &qy, &ivec, &jvec, &distances, dry_depth, gamma,
+    )?;
+    Ok(
+        numpy::ndarray::Array3::from_shape_vec((depth.shape()[0], depth.shape()[1], 9), data)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?
+            .into_pyarray(py),
+    )
+}
+
+#[pyfunction]
+#[pyo3(signature = (weights, starts, cells, stage, eta, depth, uw, ux, uy, config, seed, weight_inputs=None))]
 #[allow(clippy::too_many_arguments)]
 fn water_phase<'py>(
     py: Python<'py>,
-    weights: PyReadonlyArray3<'py, f64>,
+    weights: Option<PyReadonlyArray3<'py, f64>>,
     starts: PyReadonlyArray1<'py, i64>,
     cells: PyReadonlyArray2<'py, i64>,
     stage: PyReadonlyArray2<'py, f32>,
@@ -386,6 +566,7 @@ fn water_phase<'py>(
     uy: PyReadonlyArray2<'py, f32>,
     config: &WaterConfig,
     seed: u64,
+    weight_inputs: Option<WeightInputs<'py>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let shape = cells.shape();
     let (rows, cols) = (shape[0], shape[1]);
@@ -393,7 +574,9 @@ fn water_phase<'py>(
         || cols < 3
         || config.l0 > rows - 2
         || config.ctr >= cols
-        || weights.shape() != [rows, cols, 9]
+        || weights
+            .as_ref()
+            .is_some_and(|w| w.shape() != [rows, cols, 9])
         || [
             stage.shape(),
             eta.shape(),
@@ -415,7 +598,20 @@ fn water_phase<'py>(
             "start index outside water-phase grid",
         ));
     }
-    let weights = weights.as_slice()?;
+    let generated;
+    let weights = if let Some((factor, qx, qy, ivec, jvec, distances, dry_depth, gamma)) =
+        weight_inputs
+    {
+        generated = construct_water_weights(
+            &depth, &stage, &factor, &cells, &qx, &qy, &ivec, &jvec, &distances, dry_depth, gamma,
+        )?;
+        generated.as_slice()
+    } else {
+        weights
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("water weights or weight inputs required"))?
+            .as_slice()?
+    };
     if weights.iter().any(|&w| !w.is_finite() || w < 0.0) {
         return Err(PyValueError::new_err(
             "water weights must be finite and nonnegative",
@@ -446,6 +642,12 @@ fn water_phase<'py>(
         .collect();
     let hsmth = smooth(&hnew, &fields, config);
     let result = PyDict::new(py);
+    result.set_item(
+        "water_weights",
+        numpy::ndarray::Array3::from_shape_vec((rows, cols, 9), weights.to_vec())
+            .map_err(|e| PyValueError::new_err(e.to_string()))?
+            .into_pyarray(py),
+    )?;
     for (name, data) in [
         ("qxn", routed.qx),
         ("qyn", routed.qy),
@@ -482,6 +684,7 @@ fn water_phase<'py>(
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<WaterConfig>()?;
+    module.add_function(wrap_pyfunction!(water_weights, module)?)?;
     module.add_function(wrap_pyfunction!(water_phase, module)?)?;
     module.add_function(wrap_pyfunction!(sediment::sediment_phase, module)?)?;
     Ok(())
