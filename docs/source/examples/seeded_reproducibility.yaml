@@ -1,0 +1,21 @@
+# Configuration for the seeded-reproducibility example
+# (docs/source/examples/seeded_reproducibility.py).
+#
+# Values are chosen to keep the documentation build fast, not for
+# geomorphic realism: the point of the example is determinism, and any
+# valid configuration demonstrates it. Widen the domain or the parcel
+# counts freely -- the digest values will change, the guarantee will not.
+
+# the seed under test; the example's control run overrides it with 15
+seed: 14
+
+# small domain (50 x 50 cells at 50 m) keeps the example quick
+Length: 2500
+Width: 2500
+dx: 50
+
+# reduced parcel counts (defaults are 2000 and 2000) keep it quick;
+# itermax: 1 matches the scale of the verify_mass_conservation example
+Np_water: 500
+Np_sed: 200
+itermax: 1
