@@ -2,9 +2,7 @@ import abc
 from typing import Any, Tuple
 
 import numpy as np
-from numba import njit
-from numba import float32, int64, boolean
-from numba.experimental import jitclass
+from pyDeltaRCM import native_sediment
 from scipy import ndimage
 
 import warnings
@@ -242,7 +240,6 @@ class sed_tools(abc.ABC):
             self.eta += self.cf
 
 
-@njit
 def _get_weight_at_cell_sediment(
     ind,
     weight_int,
@@ -312,60 +309,7 @@ def _get_weight_at_cell_sediment(
 
     # final rebalance
     weight = weight / weight_sum
-
     return weight
-
-
-r_spec = [
-    ("_dt", float32),
-    ("_dx", float32),
-    ("num_starts", int64),
-    ("start_indices", int64[:]),
-    ("stepmax", float32),
-    ("force_deposit", boolean),
-    ("px", int64),
-    ("py", int64),
-    ("eta", float32[:, :]),
-    ("stage", float32[:, :]),
-    ("depth", float32[:, :]),
-    ("cell_type", int64[:, :]),
-    ("uw", float32[:, :]),
-    ("ux", float32[:, :]),
-    ("uy", float32[:, :]),
-    ("pad_stage", float32[:, :]),
-    ("pad_depth", float32[:, :]),
-    ("pad_cell_type", int64[:, :]),
-    ("qw", float32[:, :]),
-    ("qx", float32[:, :]),
-    ("qy", float32[:, :]),
-    ("qs", float32[:, :]),
-    ("ivec_flat", float32[:]),
-    ("jvec_flat", float32[:]),
-    ("iwalk_flat", int64[:]),
-    ("jwalk_flat", int64[:]),
-    ("distances_flat", float32[:]),
-    ("dry_depth", float32),
-    ("_lambda", float32),
-    ("_beta", float32),
-    ("_f_bedload", float32),
-    ("theta_sed", float32),
-    ("u_max", float32),
-    ("qs0", float32),
-    ("_u0", float32),
-    ("Vp_sed", float32),
-    ("Vp_res", float32),
-    ("Vp_dep_mud", float32[:, :]),
-    ("Vp_dep_sand", float32[:, :]),
-    ("Vp_exported", float32),
-    ("Vp_lost", float32),
-    ("U_dep_mud", float32),
-    ("U_ero_mud", float32),
-    ("U_ero_sand", float32),
-    ("mod_erosion", float32[:, :]),
-    ("mod_sed_weight", float32[:, :]),
-    ("pad_mod_sed_weight", float32[:, :]),
-    ("mod_stable_weight", float32[:, :]),
-]
 
 
 class BaseRouter:
@@ -567,7 +511,6 @@ class BaseRouter:
             return np.minimum(Vp, fourth)
 
 
-@jitclass(r_spec)
 class SandRouter(BaseRouter):
     """Jitted class to route sand.
 
@@ -701,6 +644,10 @@ class SandRouter(BaseRouter):
         self.qx = qx
         self.qy = qy
         self.qs = qs
+        self.mod_sed_weight = mod_sed_weight
+        if native_sediment.can_use_native(self, sand=True):
+            native_sediment.run_phase(self, start_indices, sand=True)
+            return
         _shape = self.eta.shape
 
         # set up volume trackers
@@ -852,7 +799,6 @@ class SandRouter(BaseRouter):
         self._update_fields(Vp_change, px, py)  # update other fields as needed
 
 
-@jitclass(r_spec)
 class MudRouter(BaseRouter):
     """Jitted class to route mud.
 
@@ -950,6 +896,10 @@ class MudRouter(BaseRouter):
         self.qw = qw
         self.qx = qx
         self.qy = qy
+        self.mod_sed_weight = mod_sed_weight
+        if native_sediment.can_use_native(self, sand=False):
+            native_sediment.run_phase(self, start_indices, sand=False)
+            return
         _shape = self.eta.shape
 
         # set up volume trackers

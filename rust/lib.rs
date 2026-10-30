@@ -1,5 +1,7 @@
 // MIT License, Copyright (c) 2016 Mariela Perignon.
 // Port of pyDeltaRCM/water_tools.py; see LICENSE for the full license.
+mod sediment;
+
 use std::collections::HashSet;
 
 use numpy::{
@@ -481,5 +483,6 @@ fn water_phase<'py>(
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<WaterConfig>()?;
     module.add_function(wrap_pyfunction!(water_phase, module)?)?;
+    module.add_function(wrap_pyfunction!(sediment::sediment_phase, module)?)?;
     Ok(())
 }
