@@ -105,5 +105,8 @@ target/
 # temp folder
 temp/
 
+# benchmark harness results
+benchmarks/results/
+
 # joss paper resources
 docs/source/_resources/joss
