@@ -3,7 +3,7 @@ import os
 import re
 import tempfile
 import yaml
-from typing import Iterator, Type, Tuple
+from typing import Dict, Iterator, Type, Tuple
 
 import numpy as np
 from numba import njit, _helperlib
@@ -102,6 +102,95 @@ def set_random_state(_state_tuple) -> None:
     """
     ptr = _helperlib.rnd_get_np_state_ptr()
     _helperlib.rnd_set_state(ptr, _state_tuple)
+
+
+# name and key length of the random number generator used by numba, recorded
+# in checkpoints so state saved from a different generator is never loaded
+_RNG_NAME = "MT19937"
+_RNG_KEY_LENGTH = 624
+
+
+def pack_rng_state() -> Dict[str, np.ndarray]:
+    """Pack the random state into arrays safe for ``.npz`` storage.
+
+    The state tuple returned by :func:`get_random_state` mixes a Python
+    integer with a Python list, which :obj:`numpy.savez` can only store as
+    a pickled object array. Pickled object arrays execute arbitrary code
+    when loaded, so :func:`unpack_rng_state` refuses them; this function
+    provides the plain typed arrays that checkpoints store instead.
+
+    Returns
+    -------
+    state : :obj:`dict`
+        Mapping with the generator name (``rng_name``), the generator
+        position (``rng_state_index``) and the generator key array
+        (``rng_state_key``), all plain arrays requiring no pickling.
+    """
+    index, key = get_random_state()
+    return {
+        "rng_name": np.array(_RNG_NAME),
+        "rng_state_index": np.int64(index),
+        "rng_state_key": np.asarray(key, dtype=np.uint32),
+    }
+
+
+def unpack_rng_state(
+    rng_name: np.ndarray, rng_state_index: np.ndarray, rng_state_key: np.ndarray
+) -> Tuple[int, list]:
+    """Rebuild the random state tuple from checkpoint arrays.
+
+    This is the inverse of :func:`pack_rng_state`. The inputs are treated
+    as untrusted file contents and validated before they reach the random
+    number generator, so a malformed checkpoint fails with ``ValueError``
+    instead of crashing the interpreter or corrupting the random stream.
+
+    Parameters
+    ----------
+    rng_name : :obj:`numpy.ndarray`
+        Generator name recorded by :func:`pack_rng_state`.
+    rng_state_index : :obj:`numpy.ndarray`
+        Generator position recorded by :func:`pack_rng_state`.
+    rng_state_key : :obj:`numpy.ndarray`
+        Generator key array recorded by :func:`pack_rng_state`.
+
+    Returns
+    -------
+    state : :obj:`tuple`
+        Random number generator state tuple, in the form accepted by
+        :func:`set_random_state`.
+
+    Raises
+    ------
+    ValueError
+        If the arrays do not match the format written by
+        :func:`pack_rng_state`.
+    """
+    rng_name = np.asarray(rng_name)
+    rng_state_index = np.asarray(rng_state_index)
+    rng_state_key = np.asarray(rng_state_key)
+
+    if rng_name.shape != () or str(rng_name) != _RNG_NAME:
+        raise ValueError(
+            "Checkpoint records an unsupported random number generator "
+            f"({str(rng_name)!r}); expected {_RNG_NAME!r}."
+        )
+    if rng_state_index.shape != ():
+        raise ValueError("Checkpoint field rng_state_index must be a scalar.")
+    if rng_state_key.dtype != np.uint32 or rng_state_key.shape != (
+        _RNG_KEY_LENGTH,
+    ):
+        raise ValueError(
+            "Checkpoint field rng_state_key must be a uint32 array of "
+            f"length {_RNG_KEY_LENGTH}, got dtype {rng_state_key.dtype} "
+            f"with shape {rng_state_key.shape}."
+        )
+    index = int(rng_state_index)
+    if not (0 <= index <= _RNG_KEY_LENGTH):
+        raise ValueError(
+            f"Checkpoint field rng_state_index must be in [0, {_RNG_KEY_LENGTH}], "
+            f"got {index}."
+        )
+    return (index, [int(v) for v in rng_state_key])
 
 
 @njit

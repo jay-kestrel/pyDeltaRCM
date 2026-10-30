@@ -415,8 +415,8 @@ class TestLoadCheckpoint:
 
         # now manually open the checkpoint file. We will `pop` all items out
         # of the dict so that we can verify there is nothing left in the
-        # checkpoint
-        checkpoint = np.load(ckp_file, allow_pickle=True)
+        # checkpoint. allow_pickle=False verifies no field is pickled.
+        checkpoint = np.load(ckp_file, allow_pickle=False)
         checkpoint = dict(checkpoint)
 
         # check that all fields are present in the checkpoint file
@@ -444,8 +444,10 @@ class TestLoadCheckpoint:
         assert np.all(_delta.sand_frac == checkpoint.pop("sand_frac"))
         assert np.all(_delta.active_layer == checkpoint.pop("active_layer"))
 
-        # load rng state
-        assert len(checkpoint.pop("rng_state")) > 0
+        # load rng state, stored as plain arrays (never pickled)
+        assert str(checkpoint.pop("rng_name")) == "MT19937"
+        assert int(checkpoint.pop("rng_state_index")) >= 0
+        assert len(checkpoint.pop("rng_state_key")) == 624
 
         # if there is anything left, something was added but not documented
         # here in the test

@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mpl_toolkits.axes_grid1 as axtk
 
-from pyDeltaRCM.shared_tools import get_random_state
+from pyDeltaRCM.shared_tools import pack_rng_state
 
 
 class iteration_tools(abc.ABC):
@@ -503,11 +503,9 @@ class iteration_tools(abc.ABC):
         """
         ckp_file = os.path.join(self.prefix, "checkpoint.npz")
 
-        # get rng state
-        rng_state_list = get_random_state()
-        rng_state = np.array(
-            rng_state_list, dtype=object
-        )  # convert to object before saving
+        # get rng state as plain arrays; storing the state as an object
+        # array would pickle it, making checkpoint files executable code
+        rng_arrays = pack_rng_state()
 
         np.savez_compressed(
             ckp_file,
@@ -532,5 +530,5 @@ class iteration_tools(abc.ABC):
             active_layer=self.active_layer,
             # boundary condition / state variables
             H_SL=self._H_SL,
-            rng_state=rng_state,
+            **rng_arrays,
         )

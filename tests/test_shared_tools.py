@@ -319,3 +319,66 @@ class TestScaleModelTime:
         assert scaled == 1
         scaled = shared_tools.scale_model_time(365.25 * 86400, If=0.1, units="years")
         assert scaled == 10
+
+
+class TestPackUnpackRngState:
+    """Tests for the pickle-free checkpoint rng state serialization."""
+
+    def test_pack_unpack_round_trip(self) -> None:
+        # pack and unpack the live random state without any draws in
+        # between, so the round trip must return the identical state
+        packed = shared_tools.pack_rng_state()
+        unpacked = shared_tools.unpack_rng_state(
+            packed["rng_name"], packed["rng_state_index"], packed["rng_state_key"]
+        )
+        assert unpacked == shared_tools.get_random_state()
+
+    def test_pack_produces_plain_arrays(self) -> None:
+        packed = shared_tools.pack_rng_state()
+        assert str(packed["rng_name"]) == "MT19937"
+        assert packed["rng_name"].dtype.kind in ("U", "S")
+        assert packed["rng_state_index"].dtype == np.int64
+        assert packed["rng_state_index"].shape == ()
+        assert packed["rng_state_key"].dtype == np.uint32
+        assert packed["rng_state_key"].shape == (624,)
+
+    def test_unpack_rejects_other_generator(self) -> None:
+        packed = shared_tools.pack_rng_state()
+        with pytest.raises(ValueError, match="unsupported random number generator"):
+            shared_tools.unpack_rng_state(
+                np.array("MT19938"), packed["rng_state_index"], packed["rng_state_key"]
+            )
+
+    def test_unpack_rejects_nonscalar_index(self) -> None:
+        packed = shared_tools.pack_rng_state()
+        with pytest.raises(ValueError, match="rng_state_index must be a scalar"):
+            shared_tools.unpack_rng_state(
+                packed["rng_name"],
+                np.zeros(1, dtype=np.int64),
+                packed["rng_state_key"],
+            )
+
+    def test_unpack_rejects_bad_index_value(self) -> None:
+        packed = shared_tools.pack_rng_state()
+        for bad_index in (-1, 625):
+            with pytest.raises(ValueError, match="rng_state_index"):
+                shared_tools.unpack_rng_state(
+                    packed["rng_name"],
+                    np.int64(bad_index),
+                    packed["rng_state_key"],
+                )
+
+    def test_unpack_rejects_bad_key_array(self) -> None:
+        packed = shared_tools.pack_rng_state()
+        # wrong dtype (float64) must be refused, not truncated to uint32
+        with pytest.raises(ValueError, match="rng_state_key must be a uint32"):
+            shared_tools.unpack_rng_state(
+                packed["rng_name"], packed["rng_state_index"], np.zeros(624)
+            )
+        # wrong length
+        with pytest.raises(ValueError, match="rng_state_key must be a uint32"):
+            shared_tools.unpack_rng_state(
+                packed["rng_name"],
+                packed["rng_state_index"],
+                np.zeros(623, dtype=np.uint32),
+            )

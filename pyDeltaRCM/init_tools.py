@@ -17,6 +17,7 @@ from pyDeltaRCM.shared_tools import (
     custom_yaml_loader,
     set_random_seed,
     set_random_state,
+    unpack_rng_state,
     ParameterChangedWarning,
 )
 from pyDeltaRCM.sed_tools import MudRouter, SandRouter
@@ -1089,7 +1090,9 @@ class init_tools(abc.ABC):
         _msg = "Locating checkpoint file"
         self.log_info(_msg, verbosity=2)
         ckp_file = os.path.join(self._checkpoint_folder, "checkpoint.npz")
-        checkpoint = np.load(ckp_file, allow_pickle=True)
+        # allow_pickle=False because checkpoint files may originate from
+        # untrusted sources; unpickling them would execute embedded code
+        checkpoint = np.load(ckp_file, allow_pickle=False)
 
         # write saved variables back to the model
         _msg = "Loading variables and grids into model"
@@ -1120,7 +1123,34 @@ class init_tools(abc.ABC):
         # load and set random state to continue as if run hadn't stopped
         _msg = "Loading random state"
         self.log_info(_msg, verbosity=2)
-        rng_state = tuple(checkpoint["rng_state"])
+        if "rng_state" in checkpoint.files:
+            # pyDeltaRCM <= 2.3 stored the random state as a pickled object
+            # array; loading such a file executes the code embedded in it,
+            # so checkpoints in that format are refused outright
+            _msg = (
+                f"The checkpoint at {ckp_file} uses the pre-2.3 pickle "
+                "format (pickled object-array rng_state), which cannot be "
+                "loaded safely because untrusted checkpoint files could "
+                "execute arbitrary code. Regenerate the checkpoint by "
+                "re-running the model with this pyDeltaRCM version."
+            )
+            raise RuntimeError(_msg)
+        _missing = {
+            "rng_name",
+            "rng_state_index",
+            "rng_state_key",
+        } - set(checkpoint.files)
+        if _missing:
+            _msg = (
+                f"The checkpoint at {ckp_file} is missing random state "
+                f"fields: {sorted(_missing)}."
+            )
+            raise ValueError(_msg)
+        rng_state = unpack_rng_state(
+            checkpoint["rng_name"],
+            checkpoint["rng_state_index"],
+            checkpoint["rng_state_key"],
+        )
         set_random_state(rng_state)
 
         # handle the case with a netcdf file
