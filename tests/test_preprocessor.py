@@ -4,11 +4,13 @@ import platform
 import os
 from pathlib import Path
 import glob
+import yaml
 
 import unittest.mock as mock
 
 import pyDeltaRCM
 from pyDeltaRCM.model import DeltaModel
+from pyDeltaRCM.shared_tools import custom_yaml_loader
 
 # from pyDeltaRCM import shared_tools
 from pyDeltaRCM import preprocessor
@@ -1443,3 +1445,173 @@ class TestScaleRelativeSeaLeveLRiseRate:
     def test_scale_If_0p1(self) -> None:
         scaled = preprocessor.scale_relative_sea_level_rise_rate(5, If=0.1)
         assert scaled == 5 / 1000 / 365.25 / 86400 * 10
+
+
+class TestQolUtilityFlags:
+    """Tests for the --new, --validate, and --demo utility flags."""
+
+    # --new
+
+    def test_scaffold_writes_file_with_defaults(self, tmp_path: Path) -> None:
+        p = tmp_path / "starter.yml"
+        preprocessor._write_scaffold_config(p)
+
+        assert p.is_file()
+        with open(p, mode="r") as f:
+            loaded = yaml.load(f, Loader=custom_yaml_loader())
+        schema = preprocessor._load_default_schema()
+
+        # every uncommented key is a known schema key or a duration key
+        for k in loaded.keys():
+            assert k in schema or k == "timesteps"
+        # the scaffold is instantly runnable: a duration is set
+        assert loaded["timesteps"] == 10
+        # null-default keys are commented out, because explicit null values
+        # are rejected by the model's type check; all other defaults emitted
+        for k, v in schema.items():
+            if v["default"] is None:
+                assert k not in loaded
+            else:
+                assert loaded[k] == v["default"]
+
+    def test_scaffold_validates_clean(self, tmp_path: Path) -> None:
+        p = tmp_path / "starter.yml"
+        preprocessor._write_scaffold_config(p)
+
+        with open(p, mode="r") as f:
+            loaded = yaml.load(f, Loader=custom_yaml_loader())
+        issues = preprocessor._validate_config_dict(
+            loaded, preprocessor._load_default_schema()
+        )
+
+        errors = [_issue for _issue in issues if _issue[0] == "error"]
+        assert errors == []
+
+    def test_scaffold_refuses_overwrite(self, tmp_path: Path) -> None:
+        p = tmp_path / "starter.yml"
+        p.write_text("existing: file\n")
+
+        with pytest.raises(FileExistsError):
+            preprocessor._write_scaffold_config(p)
+
+    # --validate
+
+    def test_validate_valid_config(self) -> None:
+        cfg = {"out_dir": "out", "seed": 0, "timesteps": 5}
+
+        issues = preprocessor._validate_config_dict(
+            cfg, preprocessor._load_default_schema()
+        )
+
+        assert issues == []
+
+    def test_validate_bad_type(self) -> None:
+        cfg = {"Np_sed": "many", "timesteps": 5}
+
+        issues = preprocessor._validate_config_dict(
+            cfg, preprocessor._load_default_schema()
+        )
+
+        errors = [m for lvl, m in issues if lvl == "error"]
+        assert len(errors) == 1
+        assert "Np_sed" in errors[0]
+
+    def test_validate_unknown_key(self) -> None:
+        cfg = {"banana": 3, "timesteps": 5}
+
+        issues = preprocessor._validate_config_dict(
+            cfg, preprocessor._load_default_schema()
+        )
+
+        errors = [m for lvl, m in issues if lvl == "error"]
+        assert len(errors) == 1
+        assert "banana" in errors[0]
+
+    def test_validate_explicit_null_rejected_like_model(self) -> None:
+        # mirrors the model: an explicit null raises a TypeError at model
+        # initialization, even for keys whose declared types include 'None'
+        cfg = {"seed": None, "timesteps": 5}
+
+        issues = preprocessor._validate_config_dict(
+            cfg, preprocessor._load_default_schema()
+        )
+
+        errors = [m for lvl, m in issues if lvl == "error"]
+        assert len(errors) == 1
+        assert "seed" in errors[0]
+
+    def test_validate_missing_duration_warns(self) -> None:
+        cfg = {"seed": 0}
+
+        issues = preprocessor._validate_config_dict(
+            cfg, preprocessor._load_default_schema()
+        )
+
+        errors = [m for lvl, m in issues if lvl == "error"]
+        warnings_ = [m for lvl, m in issues if lvl == "warning"]
+        assert errors == []
+        assert len(warnings_) == 1
+        assert "duration" in warnings_[0]
+
+    def test_validate_expansion_contents_not_checked(self) -> None:
+        # v1 scope: the fixed configuration is validated, expansion
+        # internals are only flagged with a warning
+        cfg = {"matrix": {"banana": [1, 2]}, "timesteps": 5}
+
+        issues = preprocessor._validate_config_dict(
+            cfg, preprocessor._load_default_schema()
+        )
+
+        errors = [m for lvl, m in issues if lvl == "error"]
+        warnings_ = [m for lvl, m in issues if lvl == "warning"]
+        assert errors == []
+        assert any("matrix" in w for w in warnings_)
+
+    # short-circuit wiring through the CLI parser
+
+    def test_cli_new_flag_short_circuit(self, tmp_path: Path) -> None:
+        p = tmp_path / "cli_new.yml"
+
+        with mock.patch("sys.argv", ["pyDeltaRCM", "--new", str(p)]):
+            with pytest.raises(SystemExit) as e:
+                _ = preprocessor.PreprocessorCLI()
+
+        assert e.value.code == 0
+        assert p.is_file()
+
+    def test_cli_validate_flag_short_circuit_valid(self, tmp_path: Path) -> None:
+        p = tmp_path / "valid.yml"
+        p.write_text("out_dir: somewhere\nseed: 0\ntimesteps: 5\n")
+
+        with mock.patch("sys.argv", ["pyDeltaRCM", "--validate", str(p)]):
+            with pytest.raises(SystemExit) as e:
+                _ = preprocessor.PreprocessorCLI()
+
+        assert e.value.code == 0
+
+    def test_cli_validate_flag_short_circuit_invalid(self, tmp_path: Path) -> None:
+        p = tmp_path / "invalid.yml"
+        p.write_text("banana: 3\ntimesteps: 5\n")
+
+        with mock.patch("sys.argv", ["pyDeltaRCM", "--validate", str(p)]):
+            with pytest.raises(SystemExit) as e:
+                _ = preprocessor.PreprocessorCLI()
+
+        assert e.value.code == 1
+
+    # --demo (the run path itself is covered by the integration tests)
+
+    def test_run_demo_writes_config_and_runs_via_preprocessor(
+        self, tmp_path: Path
+    ) -> None:
+        with mock.patch.object(preprocessor, "Preprocessor", autospec=True) as mock_pp:
+            mock_pp.return_value.file_list = [
+                tmp_path / "pyDeltaRCM_demo_output" / "job_000" / "job_000.yml"
+            ]
+            preprocessor._run_demo(tmp_path / "demo")
+
+        assert (tmp_path / "demo" / "pyDeltaRCM_demo.yaml").is_file()
+        assert mock_pp.call_args.kwargs["input_file"] == str(
+            tmp_path / "demo" / "pyDeltaRCM_demo.yaml"
+        )
+        mock_pp.return_value.run_jobs.assert_called_once()

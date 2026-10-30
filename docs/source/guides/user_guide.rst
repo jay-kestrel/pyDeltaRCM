@@ -246,6 +246,35 @@ Optionally, you can specify the number of simulations to run at once by followin
     $ pyDeltaRCM --config model_configuration.yml --timesteps 5000 --parallel 6
 
 
+Other command line utilities
+----------------------------
+
+Three additional command line flags help you create and check configuration files.
+
+Create a runnable, commented starter configuration file with ``--new``.
+Every model parameter is written with its default value and a comment giving the expected type, so the file can be edited down to only the parameters you want to change:
+
+.. code:: bash
+
+    $ pyDeltaRCM --new starter_config.yml
+
+Check a configuration file for unknown keys and invalid parameter types with ``--validate``.
+The check reads the file and reports any problems, then exits with an error code if errors were found.
+No output directories, log files, or job files are created, so the check is safe to run before launching long simulations:
+
+.. code:: bash
+
+    $ pyDeltaRCM --validate model_configuration.yml
+
+Run a small demonstration simulation with ``--demo``, which writes a tiny configuration into a directory (default: ``pyDeltaRCM_demo``) and runs it through the standard preprocessor.
+This is useful as a quick check that your installation works.
+Note that the demonstration model run compiles ``numba`` kernels on the fly, which takes tens of seconds:
+
+.. code:: bash
+
+    $ pyDeltaRCM --demo
+
+
 Low-level model API
 ===================
 
