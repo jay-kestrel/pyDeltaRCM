@@ -450,6 +450,50 @@ class TestFinalize:
 
         assert _delta._is_finalized is True
 
+    def test_finalize_close_failure_raises(self, tmp_path: Path) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml")
+        _delta = DeltaModel(input_file=p)
+
+        # a failing close must surface to the caller and leave the model
+        #   unfinalized so the close can be retried
+        _delta.output_netcdf = mock.MagicMock()
+        _delta.output_netcdf.close.side_effect = OSError("disk full")
+        with pytest.raises(OSError):
+            _delta.finalize()
+        assert _delta._is_finalized is False
+
+
+class TestSaveVelocityFigsSetter:
+
+    def test_disable_velocity_fig_removes_velocity_entry(
+        self, tmp_path: Path
+    ) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml")
+        _delta = DeltaModel(input_file=p)
+
+        # toggling velocity figures off must remove only the velocity
+        #   entry; the sedflux entry must survive untouched
+        _delta.save_sedflux_figs = True
+        _delta.save_velocity_figs = True
+        _delta.save_velocity_figs = False
+
+        assert "velocity" not in _delta._save_fig_list
+        assert "sedflux" in _delta._save_fig_list
+
+    def test_disable_velocity_fig_without_sedflux_entry(
+        self, tmp_path: Path
+    ) -> None:
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml")
+        _delta = DeltaModel(input_file=p)
+
+        # with no sedflux entry (the default), disabling velocity figures
+        #   must not raise
+        _delta.save_velocity_figs = True
+        _delta.save_velocity_figs = False
+
+        assert "velocity" not in _delta._save_fig_list
+        assert "sedflux" not in _delta._save_fig_list
+
 
 class TestPublicSettersAndGetters:
 

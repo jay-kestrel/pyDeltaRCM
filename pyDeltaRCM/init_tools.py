@@ -24,6 +24,26 @@ from pyDeltaRCM.sed_tools import MudRouter, SandRouter
 # tools for initiating deltaRCM model domain
 
 
+def _config_type_error(key, value, expected_type, input_file) -> TypeError:
+    """Build the TypeError for a wrongly-typed yaml parameter value.
+
+    The message reports the type of the *value* the user supplied (not the
+    always-string dict key) and formats the expected types as readable
+    names.
+    """
+    if isinstance(expected_type, (list, tuple)):
+        expected_str = ", ".join(_t.__name__ for _t in expected_type)
+    else:
+        expected_str = expected_type.__name__
+    return TypeError(
+        f"Input for {str(key)} not of the "
+        f"right type in yaml configuration "
+        f"file {input_file}. "
+        f"Input type was {type(value).__name__}, "
+        f"but needs to be {expected_str}."
+    )
+
+
 class init_tools(abc.ABC):
     def import_files(self, kwargs_dict={}) -> None:
         """Import the input files.
@@ -182,12 +202,8 @@ class init_tools(abc.ABC):
                 if type(self._user_dict[k]) in expected_type:
                     input_file_vars[k] = self._user_dict[k]
                 else:
-                    raise TypeError(
-                        f"Input for {str(k)} not of the "
-                        f"right type in yaml configuration "
-                        f"file {self.input_file}. "
-                        f"Input type was {type(k).__name__}, "
-                        f"but needs to be {expected_type}."
+                    raise _config_type_error(
+                        k, self._user_dict[k], expected_type, self.input_file
                     )
             else:
                 input_file_vars[k] = self._default_dict[k]["default"]
@@ -211,12 +227,8 @@ class init_tools(abc.ABC):
                 if type(self._user_dict[k]) in expected_type:
                     input_file_vars[k] = self._user_dict[k]
                 else:
-                    raise TypeError(
-                        f"Input for {str(k)} not of the "
-                        f"right type in yaml configuration "
-                        f"file {self.input_file}. "
-                        f"Input type was {type(k).__name__}, "
-                        f"but needs to be {expected_type}."
+                    raise _config_type_error(
+                        k, self._user_dict[k], expected_type, self.input_file
                     )
             else:
                 # set using default value

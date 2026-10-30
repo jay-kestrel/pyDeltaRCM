@@ -478,7 +478,7 @@ class iteration_tools(abc.ABC):
         except Exception as e:
             _msg = f"Failed to save {var_name} grid to netCDF file, " f"Exception: {e}"
             self.logger.error(_msg)
-            raise Exception(e)
+            raise
 
     def save_the_checkpoint(self) -> None:
         """Save checkpoint files.
