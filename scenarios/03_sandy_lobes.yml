@@ -1,0 +1,23 @@
+# 03_sandy_lobes — bedload-dominated sediment supply.
+# Same grid/seed as 01_classic_birdsfoot; f_bedload 0.9.
+# Derived (not configurable): Qw0 = 1250 m^3/s, Qs0 = 1.25 m^3/s, dt = 25000 s.
+# gamma = g*S0*dx/u0^2 = 0.0736 <= 0.1 (no warning).
+# Expected morphology: stubby sandy lobes.
+Length: 4000.0
+Width: 4000.0
+dx: 50.0
+N0_meters: 250.0      # exactly 5 cells
+L0_meters: 150.0      # exactly 3 cells
+u0: 1.0
+h0: 5.0
+S0: 0.00015
+C0_percent: 0.1
+f_bedload: 0.9
+Np_water: 500
+Np_sed: 500
+seed: 14
+save_eta_figs: true
+save_figs_sequential: true
+save_dt: 1000000      # a figure every 40 steps; the final save lands on the last step
+out_dir: runs/sandy_lobes         # replaced by the harness with a per-run temp dir
+timesteps: 720        # 720 * 25000 s = 1.8e7 s ~ 0.57 model yr; calibrated to budget
