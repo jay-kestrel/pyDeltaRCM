@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import shutil
 import statistics
@@ -76,6 +77,10 @@ def load_fixture_config(fixture_dir: Path) -> dict:
 
 def init_model(fixture_dir: Path) -> tuple[object, Path]:
     """Init a DeltaModel from the fixture config with a throwaway out_dir."""
+    # the goldens pin the historical NumPy/Numba reference stream (the
+    #   integration golden test forces this the same way); run the Python
+    #   routing path so runner output is comparable to the fixtures
+    os.environ["PYDELTARCM_NATIVE"] = "0"
     from pyDeltaRCM import DeltaModel
 
     cfg = load_fixture_config(fixture_dir)
