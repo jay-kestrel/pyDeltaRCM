@@ -1665,3 +1665,17 @@ class TestCustomInputs:
             delta = CustomInputs(input_file=p)
 
         assert not hasattr(delta, "unused_input_yaml")
+
+
+class TestTypeErrorMessages:
+
+    def test_type_error_reports_value_type(self, tmp_path: Path) -> None:
+        # the message must report the type of the *value* the user wrote
+        #   (float), not the always-string dict key, and format the
+        #   expected types as readable names
+        p = utilities.yaml_from_dict(tmp_path, "input.yaml", {"Np_water": 2.5})
+
+        with pytest.raises(
+            TypeError, match=r"Input type was float, but needs to be int"
+        ):
+            DeltaModel(input_file=p)

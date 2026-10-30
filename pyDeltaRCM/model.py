@@ -242,6 +242,10 @@ class DeltaModel(
         except Exception as e:
             self.logger.error("Failed to close output NetCDF4 file")
             self.logger.exception(e)
+            # surface the failure to the caller instead of swallowing it:
+            #   buffered netCDF data may have been lost, and the model must
+            #   stay unfinalized so the close can be retried
+            raise
 
         self._is_finalized = True
 
@@ -754,7 +758,7 @@ class DeltaModel(
         elif (save_velocity_figs is False) and (
             "velocity" in self._save_fig_list.keys()
         ):
-            del self._save_fig_list["sedflux"]
+            del self._save_fig_list["velocity"]
         self._save_velocity_figs = save_velocity_figs
 
     @property
