@@ -128,8 +128,14 @@ class init_tools(abc.ABC):
         This method is the first called in the initialization of the
         `DeltaModel`, after the configuration variables have been imported.
         """
-        # must identify out_dir manually, because input file not yet processed to model
-        if "out_dir" in self._user_dict.keys():
+        # must identify out_dir manually, because input file not yet processed
+        # to model; kwargs are documented to supercede the YAML configuration,
+        # so the out_dir kwarg must be applied *before* the output
+        # infrastructure (this method) creates directories -- merging happens
+        # only later, in process_input_to_model
+        if "out_dir" in self._kwargs_dict.keys():
+            self.out_dir = self._kwargs_dict["out_dir"]
+        elif "out_dir" in self._user_dict.keys():
             self.out_dir = self._user_dict["out_dir"]
         else:
             self.out_dir = self._default_dict["out_dir"]["default"]
