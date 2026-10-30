@@ -1,9 +1,11 @@
 import abc
 import argparse
 import itertools
+import logging
 import multiprocessing
 import os
 import platform
+import sys
 import time
 import warnings
 import yaml
@@ -22,6 +24,13 @@ from pyDeltaRCM.model import DeltaModel as BaseDeltaModel
 
 
 _ver: str = " ".join(("pyDeltaRCM", _get_version()))
+
+
+class _ConsoleMarkFilter(logging.Filter):
+    """Pass only records marked for console emission (``console=True``)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return getattr(record, "console", False)
 
 
 class BasePreprocessor(abc.ABC):
@@ -55,6 +64,59 @@ class BasePreprocessor(abc.ABC):
         self._dryrun = False
 
         self._is_completed = False
+
+        # namespaced preprocessor logger, mirroring the model loggers: an
+        # explicit DEBUG level (the default effective level at the root
+        # logger would drop info records) and no propagation, so records
+        # never reach a host application's loggers uninvited
+        self.logger = logging.getLogger("pyDeltaRCM.preprocessor")
+        self.logger.setLevel(logging.DEBUG)
+        self.logger.propagate = False
+
+    def _log_info(self, message: str, *args, verbosity: int = 0) -> None:
+        """Log a console-visible info record at the verbosity gate.
+
+        Mirrors the model's ``log_info`` gating with every record marked for
+        console emission; the preprocessor logger owns no file handler, so
+        while the preprocessor runs the console handler is the destination.
+
+        Parameters
+        ----------
+        message : :obj:`str`
+            Message string to write to the log as info.
+
+        *args
+            Optional %-style arguments for the message, interpolated lazily
+            by the logging machinery only when the verbosity gate passes.
+
+        verbosity : :obj:`int`, optional
+            Verbosity threshold, whether to write the message to the log or
+            not. Default value is `0`, or i.e. to always log.
+        """
+        if self.verbose >= verbosity:
+            self.logger.info(message, *args, extra={"console": True})
+
+    def _attach_console_handler(self) -> None:
+        """Attach the console StreamHandler for the active run.
+
+        Idempotent: a console-mark handler left attached by a preprocessor
+        that never completed its run is replaced, so repeated construction
+        never stacks duplicate stdout handlers.
+        """
+        self._detach_console_handler()
+
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setFormatter(logging.Formatter("%(message)s"))
+        ch.addFilter(_ConsoleMarkFilter())
+        self.logger.addHandler(ch)
+
+    def _detach_console_handler(self) -> None:
+        """Remove the console StreamHandler when the run completes."""
+        for h in [
+            h for h in self.logger.handlers
+            if any(isinstance(f, _ConsoleMarkFilter) for f in h.filters)
+        ]:
+            self.logger.removeHandler(h)
 
     @property
     def file_list(self) -> List[Path]:
@@ -125,6 +187,9 @@ class BasePreprocessor(abc.ABC):
         specifications. For example, `matrix`, `set`, and
         ensemble yaml files are created in this stage.
         """
+        # wire the console handler before any expansion output
+        self._attach_console_handler()
+
         # complete a preliminary parsing of the yaml for high-level controls
         self._prelim_config_parsing()
 
@@ -370,12 +435,9 @@ class BasePreprocessor(abc.ABC):
         jobs = len(_set)
         dims = len(_set[0])
 
-        if self.verbose > 0:
-            print(
-                ("Set expansion:\n" + "  dims {_dims}\n" + "  jobs {_jobs}").format(
-                    _dims=dims, _jobs=jobs
-                )
-            )
+        self._log_info(
+            "Set expansion:\n  dims %s\n  jobs %s", dims, jobs, verbosity=1
+        )
 
         # preallocate the matrix expansion job yamls and output table
         self._matrix_table = np.empty((jobs, dims + 1), dtype="O")  # output table
@@ -481,12 +543,9 @@ class BasePreprocessor(abc.ABC):
         _combs = list(itertools.product(*lil))  # actual matrix expansion
         _fixed_config = self.config_dict.copy()  # fixed config dict
 
-        if self.verbose > 0:
-            print(
-                ("Matrix expansion:\n" + "  dims {_dims}\n" + "  jobs {_jobs}").format(
-                    _dims=dims, _jobs=jobs
-                )
-            )
+        self._log_info(
+            "Matrix expansion:\n  dims %s\n  jobs %s", dims, jobs, verbosity=1
+        )
 
         # preallocate the matrix expansion job yamls and output table
         self._matrix_table = np.empty((jobs, dims + 1), dtype="O")  # output table
@@ -538,8 +597,7 @@ class BasePreprocessor(abc.ABC):
         # loop through each job to write out info
         for c, config in enumerate(self.config_list):
             # write out the job specific yaml file
-            if self.verbose > 0:
-                print("Writing YAML file for job " + str(int(c)))
+            self._log_info("Writing YAML file for job %d", c, verbosity=1)
 
             ith_dir = Path(config["out_dir"])  # job output folder
             ith_id = ith_dir.parts[-1]  # job id
@@ -574,183 +632,195 @@ class BasePreprocessor(abc.ABC):
         preprocessor. If `--parallel` is specified in the command line or YAML
         file, the jobs will run in parallel.
         """
-        if self._dryrun:
-            return
+        try:
+            if self._dryrun:
+                return
 
-        # process the special DeltaModel argument
-        #  if not None, it is a class to be used by the Jobs
-        if DeltaModel is None:
-            DeltaModel = BaseDeltaModel
+            # process the special DeltaModel argument
+            #  if not None, it is a class to be used by the Jobs
+            if DeltaModel is None:
+                DeltaModel = BaseDeltaModel
 
-        # initialize empty list to maintain reference to all Job instances
-        num_total_processes = len(self.file_list)
+            # initialize empty list to maintain reference to all Job instances
+            num_total_processes = len(self.file_list)
 
-        # NOTE: multiprocessing infrastructure is only available on linux.
-        #       We only use parallel approach if the --parallel flag is given
-        #       and we are running on linux.
-        if "parallel" in self.config_dict.keys():
-            # and not (self.config_dict['parallel'] is None)):
-            _parallel_flag = self.config_dict["parallel"]
-        else:
-            _parallel_flag = False
-
-        # if the parallel flag is given use the parallel infrastructure
-        #   NOTE: the following evaluates to true for boolean `True` or
-        #         any `int` > 0
-        if _parallel_flag:
-            # validate that os is Linux, otherwise error
-            _os = platform.system()
-            if _os != "Linux":
-                raise NotImplementedError(
-                    "Parallel simulations only implemented on Linux."
-                )
-
-            # determine the number of processors to use
-            if _parallel_flag is True:
-                # (number cores avail - 1), or 1 and never 0
-                num_parallel_processes = (multiprocessing.cpu_count() - 1) or 1
-            elif isinstance(_parallel_flag, int):
-                num_parallel_processes = _parallel_flag
+            # NOTE: multiprocessing infrastructure is only available on linux.
+            #       We only use parallel approach if the --parallel flag is given
+            #       and we are running on linux.
+            if "parallel" in self.config_dict.keys():
+                # and not (self.config_dict['parallel'] is None)):
+                _parallel_flag = self.config_dict["parallel"]
             else:
-                raise ValueError(
-                    "Parallel flag must be boolean or integer, "
-                    "but was {}, {}.".format(type(_parallel_flag), str(_parallel_flag))
-                )
-            # number of parallel processes is never greater than number of jobs
-            num_parallel_processes = np.minimum(
-                num_parallel_processes, num_total_processes
-            )
+                _parallel_flag = False
 
-            _msg = "Running %g parallel jobs" % num_parallel_processes
-            if self.verbose >= 1:
-                print(_msg)
-
-            # use Semaphore to limit number of concurrent Job
-            s = multiprocessing.Semaphore(num_parallel_processes)
-
-            # start a Queue for all Jobs
-            q = multiprocessing.Queue()
-
-            # loop and create and start all jobs
-            num_failed_jobs = 0
-            for i in range(0, num_total_processes):
-                # open yaml file for specific job
-                job_yaml = self._open_yaml(self.file_list[i])
-
-                # apply job yaml to config dict
-                #   enables complex job setups, where configs are edited
-                #   between writing and .run_jobs()
-                job_config = self.config_list[i].copy()
-                job_config.update(job_yaml)
-
-                try:
-                    # instantiate the job BEFORE acquiring the semaphore:
-                    #   the constructor builds the DeltaModel, and a failure
-                    #   there must not leak an acquired semaphore unit
-                    p = _ParallelJob(
-                        i=i,
-                        queue=q,
-                        sema=s,
-                        input_file=self.file_list[i],
-                        config_dict=job_config,
-                        DeltaModel=DeltaModel,
+            # if the parallel flag is given use the parallel infrastructure
+            #   NOTE: the following evaluates to true for boolean `True` or
+            #         any `int` > 0
+            if _parallel_flag:
+                # validate that os is Linux, otherwise error
+                _os = platform.system()
+                if _os != "Linux":
+                    raise NotImplementedError(
+                        "Parallel simulations only implemented on Linux."
                     )
-                except Exception:
-                    _msg = (
-                        "job: %d, stage: 0, code: 1, msg: "
-                        "job failed to build model" % i
-                    )
-                    print(_msg)
-                    num_failed_jobs += 1
-                    continue
 
-                s.acquire()  # aquire resource from Semaphore
-                self._job_list.append(p)
-                p.start()
-
-            # join processes to prevent ending the jobs before moving forward
-            for i in self._job_list:
-                i.join()
-
-            # read from the queue and report (asynchronous...buggy...)
-            time.sleep(1)
-            while not q.empty():
-                gotq = q.get()
-                if gotq["code"] == 1:
-                    num_failed_jobs += 1
-                    print("Job {job} ended in error:\n {msg}".format_map(gotq))
+                # determine the number of processors to use
+                if _parallel_flag is True:
+                    # (number cores avail - 1), or 1 and never 0
+                    num_parallel_processes = (multiprocessing.cpu_count() - 1) or 1
+                elif isinstance(_parallel_flag, int):
+                    num_parallel_processes = _parallel_flag
                 else:
-                    print(
-                        "Job {job} returned code {code} "
-                        "for stage {stage}.".format_map(gotq)
+                    raise ValueError(
+                        "Parallel flag must be boolean or integer, "
+                        "but was {}, {}.".format(type(_parallel_flag), str(_parallel_flag))
                     )
-
-            # surface job failures: batch drivers rely on the preprocessor
-            #   raising instead of silently completing with failed jobs
-            if num_failed_jobs > 0:
-                raise RuntimeError(
-                    "%d job(s) ended in error; see messages above."
-                    % num_failed_jobs
+                # number of parallel processes is never greater than number of jobs
+                num_parallel_processes = np.minimum(
+                    num_parallel_processes, num_total_processes
                 )
 
-        # if the parallel flag is False (default)
-        elif _parallel_flag is False:
-            # loop and create all jobs
-            num_failed_jobs = 0
-            for i in range(0, num_total_processes):
-                # open yaml file for specific job
-                job_yaml = self._open_yaml(self.file_list[i])
-
-                # apply job yaml to config dict
-                #   enables complex job setups, where configs are edited
-                #   between writing and .run_jobs()
-                job_config = self.config_list[i].copy()
-                job_config.update(job_yaml)
-
-                try:
-                    p = _SerialJob(
-                        i=i,
-                        input_file=self.file_list[i],
-                        config_dict=job_config,
-                        DeltaModel=DeltaModel,
-                    )
-                except Exception:
-                    _msg = (
-                        "job: %d, stage: 0, code: 1, msg: "
-                        "job failed to build model" % i
-                    )
-                    print(_msg)
-                    num_failed_jobs += 1
-                    continue
-
-                self._job_list.append(p)
-
-            # run the job(s)
-            for i, job in enumerate(self._job_list):
-                if self.verbose > 0:
-                    print("Starting job %s" % str(i))
-                job.run()
-
-            # surface job failures: batch drivers rely on the preprocessor
-            #   raising instead of silently completing with failed jobs
-            #   (only an explicitly-True flag counts, so mocked jobs in
-            #   tests do not register as failures)
-            num_failed_jobs += sum(
-                1
-                for job in self._job_list
-                if getattr(job, "failed", False) is True
-            )
-            if num_failed_jobs > 0:
-                raise RuntimeError(
-                    "%d job(s) ended in error; see log messages above."
-                    % num_failed_jobs
+                self._log_info(
+                    "Running %g parallel jobs", num_parallel_processes, verbosity=1
                 )
 
-        # if the parallel flag is a junk value
-        else:
-            raise ValueError
+                # use Semaphore to limit number of concurrent Job
+                s = multiprocessing.Semaphore(num_parallel_processes)
 
-        self._is_completed = True
+                # start a Queue for all Jobs
+                q = multiprocessing.Queue()
+
+                # loop and create and start all jobs
+                num_failed_jobs = 0
+                for i in range(0, num_total_processes):
+                    # open yaml file for specific job
+                    job_yaml = self._open_yaml(self.file_list[i])
+
+                    # apply job yaml to config dict
+                    #   enables complex job setups, where configs are edited
+                    #   between writing and .run_jobs()
+                    job_config = self.config_list[i].copy()
+                    job_config.update(job_yaml)
+
+                    try:
+                        # instantiate the job BEFORE acquiring the semaphore:
+                        #   the constructor builds the DeltaModel, and a failure
+                        #   there must not leak an acquired semaphore unit
+                        p = _ParallelJob(
+                            i=i,
+                            queue=q,
+                            sema=s,
+                            input_file=self.file_list[i],
+                            config_dict=job_config,
+                            DeltaModel=DeltaModel,
+                        )
+                    except Exception:
+                        self.logger.warning(
+                            "job: %d, stage: 0, code: 1, msg: "
+                            "job failed to build model",
+                            i,
+                            extra={"console": True},
+                        )
+                        num_failed_jobs += 1
+                        continue
+
+                    s.acquire()  # aquire resource from Semaphore
+                    self._job_list.append(p)
+                    p.start()
+
+                # join processes to prevent ending the jobs before moving forward
+                for i in self._job_list:
+                    i.join()
+
+                # read from the queue and report (asynchronous...buggy...)
+                time.sleep(1)
+                while not q.empty():
+                    gotq = q.get()
+                    if gotq["code"] == 1:
+                        num_failed_jobs += 1
+                        self.logger.warning(
+                            "Job %s ended in error:\n %s",
+                            gotq["job"],
+                            gotq["msg"],
+                            extra={"console": True},
+                        )
+                    else:
+                        self.logger.info(
+                            "Job %s returned code %s for stage %s.",
+                            gotq["job"],
+                            gotq["code"],
+                            gotq["stage"],
+                            extra={"console": True},
+                        )
+
+                # surface job failures: batch drivers rely on the preprocessor
+                #   raising instead of silently completing with failed jobs
+                if num_failed_jobs > 0:
+                    raise RuntimeError(
+                        "%d job(s) ended in error; see messages above."
+                        % num_failed_jobs
+                    )
+
+            # if the parallel flag is False (default)
+            elif _parallel_flag is False:
+                # loop and create all jobs
+                num_failed_jobs = 0
+                for i in range(0, num_total_processes):
+                    # open yaml file for specific job
+                    job_yaml = self._open_yaml(self.file_list[i])
+
+                    # apply job yaml to config dict
+                    #   enables complex job setups, where configs are edited
+                    #   between writing and .run_jobs()
+                    job_config = self.config_list[i].copy()
+                    job_config.update(job_yaml)
+
+                    try:
+                        p = _SerialJob(
+                            i=i,
+                            input_file=self.file_list[i],
+                            config_dict=job_config,
+                            DeltaModel=DeltaModel,
+                        )
+                    except Exception:
+                        self.logger.warning(
+                            "job: %d, stage: 0, code: 1, msg: "
+                            "job failed to build model",
+                            i,
+                            extra={"console": True},
+                        )
+                        num_failed_jobs += 1
+                        continue
+
+                    self._job_list.append(p)
+
+                # run the job(s)
+                for i, job in enumerate(self._job_list):
+                    self._log_info("Starting job %s", i, verbosity=1)
+                    job.run()
+
+                # surface job failures: batch drivers rely on the preprocessor
+                #   raising instead of silently completing with failed jobs
+                #   (only an explicitly-True flag counts, so mocked jobs in
+                #   tests do not register as failures)
+                num_failed_jobs += sum(
+                    1
+                    for job in self._job_list
+                    if getattr(job, "failed", False) is True
+                )
+                if num_failed_jobs > 0:
+                    raise RuntimeError(
+                        "%d job(s) ended in error; see log messages above."
+                        % num_failed_jobs
+                    )
+
+            # if the parallel flag is a junk value
+            else:
+                raise ValueError
+
+            self._is_completed = True
+        finally:
+            self._detach_console_handler()
 
 
 class _BaseJob(abc.ABC):
