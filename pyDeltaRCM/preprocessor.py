@@ -211,6 +211,16 @@ class BasePreprocessor(abc.ABC):
             user_file = open(input_file, mode="r")
             yaml_dict = yaml.load(user_file, Loader=loader)
             user_file.close()
+            if yaml_dict is None:
+                # an empty (or comment-only) YAML file parses to None;
+                #   treat it as an empty configuration rather than crashing
+                #   with a bare TypeError when the result is updated into a
+                #   config dict
+                _msg = "Input YAML file is empty: %s. Proceeding with an empty configuration." % str(
+                    input_file
+                )
+                warnings.warn(UserWarning(_msg))
+                yaml_dict = {}
             return yaml_dict
 
     def _prepare_multijob_output(self) -> None:
@@ -227,8 +237,10 @@ class BasePreprocessor(abc.ABC):
         if p.is_dir():
             if (
                 "resume_checkpoint" in self.config_dict
-                and self.config_dict["resume_checkpoint"] is True
+                and bool(self.config_dict["resume_checkpoint"])
             ):
+                # bool() (not ``is True``): resume_checkpoint also accepts a
+                #   string path, which must count as resuming here
                 pass
             else:
                 raise FileExistsError(
@@ -423,9 +435,24 @@ class BasePreprocessor(abc.ABC):
             raise ValueError(
                 'Invalid matrix specification, was not evaluated to "dict".'
             )
+        if len(_matrix) == 0:
+            # np.prod([]) is a *float* (1.0), which would crash later with
+            #   a numpy TypeError when used as a shape/index
+            raise ValueError(
+                "Matrix expansion is empty; remove the empty 'matrix' key "
+                "or add expansion keys."
+            )
         if "out_dir" in _matrix.keys():
             raise ValueError('You cannot specify "out_dir" as a matrix expansion key.')
         for k in _matrix.keys():  # check validity of keys, depth == 1
+            if isinstance(_matrix[k], str) or not isinstance(
+                _matrix[k], (list, tuple)
+            ):
+                raise ValueError(
+                    "Matrix expansion values must be lists of values, but "
+                    'key "%s" was a %s.'
+                    % (str(k), type(_matrix[k]).__name__)
+                )
             if len(_matrix[k]) == 1:
                 warnings.warn(
                     UserWarning(
@@ -450,7 +477,7 @@ class BasePreprocessor(abc.ABC):
         lil = [_matrix[v] for k, v in enumerate(var_list)]
         dims = len(lil)
         pts = [len(lst) for lst in lil]
-        jobs = np.prod(pts)
+        jobs = int(np.prod(pts))
         _combs = list(itertools.product(*lil))  # actual matrix expansion
         _fixed_config = self.config_dict.copy()  # fixed config dict
 
@@ -521,8 +548,10 @@ class BasePreprocessor(abc.ABC):
             if ith_dir.is_dir():
                 if (
                     "resume_checkpoint" in self.config_dict
-                    and self.config_dict["resume_checkpoint"] is True
+                    and bool(self.config_dict["resume_checkpoint"])
                 ):
+                    # bool() (not ``is True``): resume_checkpoint also
+                    #   accepts a string path, which must count as resuming
                     pass
                 else:
                     raise FileExistsError(
@@ -768,8 +797,41 @@ class _BaseJob(abc.ABC):
         else:
             self._If = 1.0
 
+        # If scales the simulated duration; a value of 0 (or below) silently
+        #   produced zero-step "successful" runs, and values above 1 are not
+        #   physical (the help text documents the (0, 1] domain)
+        if not (0 < self._If <= 1):
+            raise ValueError(
+                "Invalid intermittency factor If: %s. If must be in (0, 1]."
+                % str(self._If)
+            )
+
+        # announce when multiple duration keys are specified: the effective
+        #   precedence (timesteps first, checked below) must not be silent
+        _specified_durations = [
+            k
+            for k in ("timesteps", "time", "time_years")
+            if k in config_dict.keys()
+        ]
+        if len(_specified_durations) > 1:
+            warnings.warn(
+                UserWarning(
+                    "Multiple run-duration keys specified: %s. The "
+                    '"timesteps" value takes precedence.'
+                    % ", ".join(_specified_durations)
+                )
+            )
+
         # determine job end time, *in model time*
         if "timesteps" in config_dict.keys():
+            # a non-positive number of steps silently produced zero-step
+            #   "successful" runs (an empty range is not an error)
+            if config_dict["timesteps"] <= 0:
+                raise ValueError(
+                    "Invalid number of timesteps: %s. Timesteps must be a "
+                    "positive integer." % str(config_dict["timesteps"])
+                )
+
             # fill informational fields
             self._time_type = "timesteps"
             self._time_config = config_dict["timesteps"]
@@ -780,6 +842,14 @@ class _BaseJob(abc.ABC):
             )
 
         elif "time" in config_dict.keys():
+            # a non-positive duration silently produced zero-step
+            #   "successful" runs
+            if config_dict["time"] <= 0:
+                raise ValueError(
+                    "Invalid run time: %s. time must be a positive number "
+                    "of seconds." % str(config_dict["time"])
+                )
+
             # fill informational fields
             self._time_type = "time"
             self._time_config = config_dict["time"]
@@ -788,6 +858,14 @@ class _BaseJob(abc.ABC):
             self._job_end_time = _curr_time + (config_dict["time"] * self._If)
 
         elif "time_years" in config_dict.keys():
+            # a non-positive duration silently produced zero-step
+            #   "successful" runs
+            if config_dict["time_years"] <= 0:
+                raise ValueError(
+                    "Invalid run time_years: %s. time_years must be a "
+                    "positive number of years." % str(config_dict["time_years"])
+                )
+
             # fill informational fields
             self._time_type = "time_years"
             self._time_config = config_dict["time_years"]
@@ -876,6 +954,10 @@ class _SerialJob(_BaseJob):
         super().__init__(
             i, input_file, config_dict, DeltaModel=DeltaModel, defer_output=False
         )
+        # the job logs its completion stages after finalize() returns, so
+        #   finalize must not remove the log file handler yet; the job
+        #   tears the handler down explicitly after its last message
+        self.deltamodel._defer_log_teardown = True
 
     def run(self) -> None:
         """Loop the model.
@@ -946,6 +1028,11 @@ class _SerialJob(_BaseJob):
         else:
             _msg = ", ".join(["job: " + str(self.i), "stage: " + "2", "code: " + "0"])
             self.deltamodel.logger.info(_msg)
+
+        # the job's final stage message is logged; release the per-run log
+        #   file handler (finalize deferred it so this message would reach
+        #   the log file)
+        self.deltamodel._teardown_log_handler()
 
 
 class _ParallelJob(_BaseJob, multiprocessing.Process):
@@ -1124,7 +1211,8 @@ class PreprocessorCLI(BasePreprocessor):
             "--timesteps",
             help="Number of timesteps to run model. Optional, "
             "and if provided, will override any value in the config file. "
-            'Is overrided by "time" options.',
+            'When multiple run-duration options are given, "timesteps" '
+            'takes precedence over "time" and "time_years".',
         )
         parser.add_argument(
             "--time",
