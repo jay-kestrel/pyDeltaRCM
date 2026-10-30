@@ -210,6 +210,10 @@ class TestCustomUnravel:
         with pytest.raises(IndexError):
             x, y = shared_tools.custom_unravel(99, arr.shape)
 
+        # the boundary value itself (i == size) must also throw
+        with pytest.raises(IndexError):
+            x, y = shared_tools.custom_unravel(9, arr.shape)
+
 
 class TestCustomRavel:
     def test_custom_ravel_square(self) -> None:
@@ -246,6 +250,10 @@ class TestCustomRavel:
         # next line should throw IndexError
         with pytest.raises(IndexError):
             _ = shared_tools.custom_ravel((50, 50), arr.shape)
+
+        # the boundary value itself must also throw
+        with pytest.raises(IndexError):
+            _ = shared_tools.custom_ravel((3, 3), arr.shape)
 
 
 class TestGetWeightSfcInt:
@@ -382,3 +390,17 @@ class TestPackUnpackRngState:
                 packed["rng_state_index"],
                 np.zeros(623, dtype=np.uint32),
             )
+
+
+class TestRandomPickDegenerate:
+    def test_random_pick_zero_total_raises(self) -> None:
+        """A probability array with no positive total raises instead of
+        silently returning direction 0."""
+        with pytest.raises(ValueError, match="positive total"):
+            shared_tools.random_pick(np.zeros(9))
+
+    def test_random_pick_nan_total_raises(self) -> None:
+        """A probability array of NaN raises instead of producing an
+        arbitrary index."""
+        with pytest.raises(ValueError, match="positive total"):
+            shared_tools.random_pick(np.full(9, np.nan))

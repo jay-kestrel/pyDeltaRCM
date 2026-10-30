@@ -165,6 +165,31 @@ class TestCheckForLoops:
         # one loop
         assert np.all(looped == [0, 1])
 
+    def test_check_for_loops_degenerate_vector_independent(self) -> None:
+        """
+        A parcel looping exactly at the inlet center (zero-length mean
+        transport vector) is relocated based on its own state, not the
+        previous parcel's relocation target.
+        """
+        # set up both parcels to loop; parcel 1's new ind is exactly
+        #   (1, CTR), giving a zero-length transport vector (Fw == 0)
+        fs = np.array([[4, 53], [5, 14]])
+        new_inds0 = np.array([53, 14])  # 14 = ravel(1, CTR) with W = 10
+        _step = 2
+        stage_minus_SL = self.stage - 0
+
+        new_inds, looped = water_tools._check_for_loops(
+            fs, new_inds0.copy(), _step,
+            self.L0, self.CTR, stage_minus_SL)
+
+        # parcel 1 must not inherit parcel 0's relocation target
+        assert np.unravel_index(new_inds[1], (10, 10)) != np.unravel_index(
+            new_inds[0], (10, 10)
+        )
+        # both loop locations are far from sea level, so both are
+        #   disqualified from the free-surface statistics
+        assert np.all(looped == [1, 1])
+
 
 class TestCalculateNewInds:
 
@@ -414,3 +439,26 @@ class TestRunWaterIterationDriedInlet:
         # pre-fix, ghost-up picks record negative flat indices here
         assert np.all(delta.free_surf_walk_inds >= 0)
 
+
+class TestInjectInletDischarge:
+    def test_accumulates_duplicate_start_indices(self) -> None:
+        """
+        Duplicate start indices accumulate once per parcel in qwn,
+        matching the per-parcel qxn injection.
+        """
+        qxn = np.zeros((4, 4))
+        qyn = np.zeros((4, 4))
+        qwn = np.zeros((4, 4))
+        start_indices = np.array([5, 5, 5, 6])
+
+        water_tools._inject_inlet_discharge(
+            qxn, qyn, qwn, start_indices, Qp_water=2.0, dx=100.0
+        )
+
+        # three parcels at cell 5, one at cell 6; each parcel carries
+        #   Qp_water / dx / 2 of discharge
+        assert qwn.flat[5] == pytest.approx(3 * 2.0 / 100.0 / 2.0)
+        assert qwn.flat[6] == pytest.approx(1 * 2.0 / 100.0 / 2.0)
+        assert qxn.flat[5] == 3
+        assert qxn.flat[6] == 1
+        assert np.all(qyn == 0)

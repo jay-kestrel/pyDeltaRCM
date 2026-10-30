@@ -326,6 +326,10 @@ def random_pick(prob):
     """
     arr = np.arange(len(prob))
     cumprob = np.cumsum(prob)
+    if not cumprob[-1] > 0:
+        # catches all-zero (and negative/NaN) probability arrays; otherwise
+        # searchsorted silently returns direction 0
+        raise ValueError("prob must contain a positive total probability")
     return arr[np.searchsorted(cumprob, get_random_uniform(cumprob[-1]))]
 
 
@@ -371,7 +375,7 @@ def custom_unravel(i: int, shape: Tuple[int, int]) -> Tuple[int, int]:
         >>> custom_unravel(5124, _shape)
         (25, 124)
     """
-    if i > (shape[1] * shape[0]):
+    if i >= (shape[1] * shape[0]):
         raise IndexError("Index is out of array bounds")
     x = i // shape[1]
     y = i % shape[1]
@@ -417,7 +421,7 @@ def custom_ravel(tup: Tuple[int, int], shape: Tuple[int, int]) -> int:
         >>> custom_ravel((25, 124), _shape)
         5124
     """
-    if tup[0] > shape[0] or tup[1] > shape[1]:
+    if tup[0] >= shape[0] or tup[1] >= shape[1]:
         raise IndexError("Index is out of array bounds")
     x = tup[0] * shape[1]
     y = tup[1]
