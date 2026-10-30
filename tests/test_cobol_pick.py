@@ -131,6 +131,7 @@ def _capture_draws(func, rows):
 class TestCobolParity:
     """Exact index parity: COBOL kernel vs the numpy reference backend."""
 
+    @requires_lib
     def test_cobol_matches_python_reference(self, monkeypatch):
         monkeypatch.setenv("PYDELTARCM_COBOL", "1")
         rows = _weight_rows(4000, seed=0)
@@ -144,6 +145,7 @@ class TestCobolParity:
         assert cobol.dtype == np.int32
         assert np.array_equal(cobol, reference)
 
+    @requires_lib
     def test_cobol_boundary_uniforms(self, monkeypatch):
         """Uniforms at the scan boundaries: 0.0, just below total, and
         interior cutoff values (side='left' equality semantics)."""
@@ -164,6 +166,7 @@ class TestCobolParity:
         cobol = cobol_tools.pick_rows(rows, uniforms=uniforms)
         assert np.array_equal(cobol, reference)
 
+    @requires_lib
     def test_cobol_single_cell_and_nonfinite_weights(self, monkeypatch):
         """n=1 rows and +inf weights (total=inf passes the >0 gate)."""
         monkeypatch.setenv("PYDELTARCM_COBOL", "1")
@@ -185,6 +188,7 @@ class TestCobolParity:
         assert np.array_equal(cobol[0], reference[0])
         assert np.array_equal(cobol[1], reference[1])
 
+    @requires_lib
     def test_cobol_repeated_cutoffs_from_float32_collapse(self, monkeypatch):
         """Mixed scales where float32 accumulation collapses distinct
         cutoffs to equal values (1e8 + 0.5 rounds back to 1e8): the scan
@@ -230,6 +234,7 @@ class TestCobolParity:
         with pytest.raises(ValueError, match="positive total probability"):
             cobol_tools.pick_rows(bad, uniforms=uniforms)
 
+    @requires_lib
     def test_cobol_nan_uniform_index_error_parity(self, monkeypatch):
         """A NaN uniform exceeds no cutoff (unordered compare): both
         backends fall through to the out-of-bounds IndexError."""
@@ -297,6 +302,7 @@ class TestDispatch:
 class TestAdapterContract:
     """Dtype discipline, shapes, and input validation at the adapter."""
 
+    @requires_lib
     def test_float64_input_canonicalized_to_float32(self, monkeypatch):
         monkeypatch.setenv("PYDELTARCM_COBOL", "1")
         row64 = np.array([0.1, 0.7, 0.2, 0.5, 0.3, 0.9, 0.4, 0.6, 0.8])
@@ -306,6 +312,7 @@ class TestAdapterContract:
         from_f32 = cobol_tools.pick_rows(row32, uniforms=uniforms)
         assert from_f64 == from_f32
 
+    @requires_lib
     def test_integer_weights_accepted(self, monkeypatch):
         """Inlet-style ones arrays (int) route through the same float32
         canonicalization."""
