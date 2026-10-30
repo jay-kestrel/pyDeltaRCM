@@ -425,9 +425,12 @@ class TestLoadCheckpoint:
         assert _delta.H_SL == float(checkpoint.pop("H_SL"))
         assert _delta._time_iter == int(checkpoint.pop("time_iter"))
         assert _delta._save_iter == int(checkpoint.pop("save_iter"))
-        assert _delta._save_time_since_data == int(
+        assert _delta._save_time_since_data == float(
             checkpoint.pop("save_time_since_data")
         )
+        # the checkpoint timer is stored as of just after the save event,
+        # i.e., reset to 0 before the file was written
+        assert float(checkpoint.pop("save_time_since_checkpoint")) == 0.0
 
         # load grids
         assert np.all(_delta.eta == checkpoint.pop("eta"))

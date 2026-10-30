@@ -177,6 +177,11 @@ class iteration_tools(abc.ABC):
                 _msg = "Saving checkpoint"
                 self.log_info(_msg, verbosity=1)
 
+                # reset the timer before saving so the checkpoint stores the
+                # counter value as of just after this save event, and a
+                # resumed model continues the checkpoint cadence on schedule
+                self._save_time_since_checkpoint = 0
+
                 self.save_the_checkpoint()
 
                 if self._checkpoint_dt != self._save_dt:
@@ -188,8 +193,6 @@ class iteration_tools(abc.ABC):
                     )
                     self.log_warning(_msg)
                     warnings.warn(_msg)
-
-                self._save_time_since_checkpoint = 0
 
     def compute_sand_frac(self) -> None:
         """Compute the sand fraction as a continous updating data field.
@@ -496,6 +499,7 @@ class iteration_tools(abc.ABC):
         - Surface sand fraction
         - Active layer values
         - Current random seed state
+        - Data-save and checkpoint timer counters
 
         If `save_checkpoint` is turned on, checkpoints are re-written
         with either a frequency of `checkpoint_dt` or `save_dt` if
@@ -516,6 +520,7 @@ class iteration_tools(abc.ABC):
             time_iter=self._time_iter,
             save_iter=self._save_iter,
             save_time_since_data=self._save_time_since_data,
+            save_time_since_checkpoint=self._save_time_since_checkpoint,
             # grids
             eta=self.eta,
             eta0=self.eta0,

@@ -1100,7 +1100,17 @@ class init_tools(abc.ABC):
         self.H_SL = float(checkpoint["H_SL"])
         self._time_iter = int(checkpoint["time_iter"])
         self._save_iter = int(checkpoint["save_iter"])
-        self._save_time_since_data = int(checkpoint["save_time_since_data"])
+        self._save_time_since_data = float(checkpoint["save_time_since_data"])
+
+        # load the checkpoint timer counter; legacy checkpoints written
+        # before the counter was persisted default to 0 so the checkpoint
+        # cadence continues on schedule rather than forcing a save
+        if "save_time_since_checkpoint" in checkpoint.files:
+            self._save_time_since_checkpoint = float(
+                checkpoint["save_time_since_checkpoint"]
+            )
+        else:
+            self._save_time_since_checkpoint = 0.0
 
         # load grids
         self.eta = checkpoint["eta"]
@@ -1206,8 +1216,14 @@ class init_tools(abc.ABC):
                     self._subgroup_name = "meta"
                 elif "auxdata" in self.output_netcdf.groups.keys():
                     self._subgroup_name = "auxdata"
+                elif len(self.output_netcdf.groups) > 0:
+                    self._subgroup_name = next(iter(self.output_netcdf.groups))
                 else:
-                    self._subgroup_name = self.output_netcdf.groups.keys()[0]
+                    raise ValueError(
+                        "No groups found in the existing NetCDF4 output file "
+                        f"at {file_path}; cannot determine the subgroup name "
+                        "for resuming the model."
+                    )
 
                 # synch netcdf file
                 self.output_netcdf.sync()

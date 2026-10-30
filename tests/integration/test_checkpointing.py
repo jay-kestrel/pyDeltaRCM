@@ -815,3 +815,134 @@ class TestCheckpointingCreatingLoading:
         # raises a permissions error on Windows
         with pytest.raises(PermissionError):
             _ = DeltaModel(input_file=p)
+
+
+@mock.patch(
+    "pyDeltaRCM.iteration_tools.iteration_tools.solve_water_and_sediment_timestep",
+    new=utilities.FastIteratingDeltaModel.solve_water_and_sediment_timestep,
+)
+class TestCheckpointFidelity:
+    """Tests for faithful checkpoint/restore of the counter variables."""
+
+    def test_checkpoint_timer_round_trip(self, tmp_path: Path) -> None:
+        """The checkpoint timer is restored finite, so the first update after
+        a resume does not force an out-of-schedule checkpoint save."""
+        # base run: checkpoint_dt different from the default save_dt
+        base_p, base_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(base_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(base_f, "save_checkpoint", True)
+        utilities.write_parameter_to_file(base_f, "checkpoint_dt", 50000)
+        base_f.close()
+        baseModel = DeltaModel(input_file=base_p)
+        for _ in range(0, 3):
+            baseModel.update()
+
+        # resumed model: the checkpoint timer must be finite (0, the value
+        # right after the last checkpoint event), not inf
+        resume_p, resume_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(resume_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(resume_f, "resume_checkpoint", True)
+        resume_f.close()
+        resumeModel = DeltaModel(input_file=resume_p)
+
+        assert np.isfinite(resumeModel._save_time_since_checkpoint)
+        assert resumeModel._save_time_since_checkpoint == 0.0
+
+        # the first update after resume must not fire a checkpoint
+        with mock.patch.object(resumeModel, "save_the_checkpoint") as mocked_save:
+            resumeModel.update()
+            assert mocked_save.call_count == 0
+        assert resumeModel._save_time_since_checkpoint == 25000.0
+
+    def test_checkpoint_save_time_since_data_float(self, tmp_path: Path) -> None:
+        """The data-save timer is restored as a float, without truncation."""
+        base_p, base_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(base_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(base_f, "save_checkpoint", True)
+        base_f.close()
+        baseModel = DeltaModel(input_file=base_p)
+        for _ in range(0, 2):
+            baseModel.update()
+
+        # simulate a mid-cycle data timer with a fractional value
+        baseModel._save_time_since_data = 12345.6789
+        baseModel.save_the_checkpoint()
+
+        resume_p, resume_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(resume_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(resume_f, "resume_checkpoint", True)
+        resume_f.close()
+        resumeModel = DeltaModel(input_file=resume_p)
+
+        assert resumeModel._save_time_since_data == 12345.6789
+
+    def test_load_checkpoint_subgroup_fallback(self, tmp_path: Path) -> None:
+        """A resumed run against an output file with a non-standard group
+        name falls back to the first group instead of raising TypeError."""
+        base_p, base_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(base_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(base_f, "save_checkpoint", True)
+        utilities.write_parameter_to_file(base_f, "save_metadata", True)
+        base_f.close()
+        baseModel = DeltaModel(input_file=base_p)
+        baseModel.update()
+
+        # rewrite the output netCDF with the meta group renamed
+        file_path = os.path.join(baseModel.prefix, "pyDeltaRCM_output.nc")
+        tmp_nc = file_path + ".tmp"
+        with Dataset(file_path) as src, Dataset(tmp_nc, "w") as dst:
+            for name in src.ncattrs():
+                dst.setncattr(name, src.getncattr(name))
+            for name, dimension in src.dimensions.items():
+                if dimension.isunlimited():
+                    dst.createDimension(name, None)
+                else:
+                    dst.createDimension(name, len(dimension))
+            for _gname, group in src.groups.items():
+                _group = dst.createGroup("custom")
+                for vname, variable in group.variables.items():
+                    _var = _group.createVariable(
+                        vname, variable.datatype, variable.dimensions
+                    )
+                    _var[:] = variable[:]
+            for name, variable in src.variables.items():
+                _var = dst.createVariable(name, variable.datatype, variable.dimensions)
+                _var[:] = variable[:]
+        shutil.move(tmp_nc, file_path)
+
+        resume_p, resume_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(resume_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(resume_f, "resume_checkpoint", True)
+        utilities.write_parameter_to_file(resume_f, "save_metadata", True)
+        resume_f.close()
+        resumeModel = DeltaModel(input_file=resume_p)
+
+        assert resumeModel._subgroup_name == "custom"
+
+    def test_load_checkpoint_no_groups_raises(self, tmp_path: Path) -> None:
+        """An output file with no groups raises a clear error, not a
+        TypeError from subscripting dict_keys."""
+        base_p, base_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(base_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(base_f, "save_checkpoint", True)
+        utilities.write_parameter_to_file(base_f, "save_metadata", True)
+        base_f.close()
+        baseModel = DeltaModel(input_file=base_p)
+        baseModel.update()
+        baseModel.finalize()
+
+        # replace the output netCDF with an empty (group-less) file
+        file_path = os.path.join(baseModel.prefix, "pyDeltaRCM_output.nc")
+        os.remove(file_path)
+        _empty = Dataset(file_path, "w")
+        _empty.close()
+
+        resume_p, resume_f = utilities.create_temporary_file(tmp_path, "base_run.yaml")
+        utilities.write_parameter_to_file(resume_f, "out_dir", tmp_path / "test")
+        utilities.write_parameter_to_file(resume_f, "resume_checkpoint", True)
+        utilities.write_parameter_to_file(resume_f, "save_metadata", True)
+        resume_f.close()
+
+        with pytest.raises(ValueError, match="No groups found"):
+            _ = DeltaModel(input_file=resume_p)
+
