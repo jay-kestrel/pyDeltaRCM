@@ -49,6 +49,35 @@ For a quick installation into an existing Python 3.x environment:
     $ pip install pyDeltaRCM
 
 
+Native water backend (this fork)
+################################
+
+Source installs on this branch require Python 3.11 or newer, a Rust toolchain
+with Cargo, and a platform C linker. With those installed, run
+``python -m pip install -e .`` from the checkout; maturin builds the PyO3
+extension in release mode. No prebuilt wheel matrix is provided here.
+
+Water-parcel routing, discharge accumulation, and free-surface reconstruction
+use one native call per water iteration by default. Set the environment
+variable ``PYDELTARCM_NATIVE=0`` before running the model to retain the original
+Python/Numba implementation. The switch changes runtime dispatch, not build
+requirements. Numba remains required for sediment routing and shared kernels.
+
+The native RNG is seeded from the existing checkpointed random stream.
+Identical native runs replay deterministically, but native and reference
+trajectories deliberately differ; compare their distributions, not their
+individual parcel paths. Keep the backend fixed when resuming a checkpoint
+if exact continuation matters. Legacy golden-output tests explicitly select
+the reference backend; separate native/reference ensemble tests exercise
+bed relief, deposition volume, and channel-mouth flux.
+
+Overridden water-phase internals or hooks, custom field precision, and
+nonstandard walk geometry retain the reference call sequence rather than
+silently bypassing subclass behavior. An unbuilt source checkout warns and
+uses the reference backend; a broken installed extension raises its import
+error. See ``benchmarks/README.md`` for reproducible backend comparisons.
+
+
 Executing the model
 ###################
 

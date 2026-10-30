@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "timestamp_utc": "2026-10-30T18:54:46+00:00",
+    "platform": "Linux-6.1.158+-x86_64-with-glibc2.41",
+    "python_version": "3.13.14",
+    "pyDeltaRCM_version": "2.3.0",
+    "pyDeltaRCM_git_commit": "bd905c8c8bdf91f1bd96eccd0bfa75625da1bed4",
+    "numpy_version": "2.5.4",
+    "numba_version": "0.68.1",
+    "scipy_version": "1.18.1"
+  },
+  "run_settings": {
+    "smoke": false,
+    "timed_updates": 20,
+    "warmup_updates": 5,
+    "morphology_threshold": 0.05,
+    "max_warmup_updates": 200
+  },
+  "scenarios": {
+    "early_water": {
+      "config": {
+        "water_backend": "rust",
+        "Length": 3000.0,
+        "Width": 6000.0,
+        "dx": 50.0,
+        "grid_shape_rows_cols": [
+          60,
+          120
+        ],
+        "Np_water": 1000,
+        "Np_sed": 1000,
+        "itermax": 3,
+        "seed": 0,
+        "model_timestep_dt_s": 25000.0
+      },
+      "warmup": {
+        "type": "fixed",
+        "updates": 5,
+        "coverage_at_window_start": 0.028888888888888888
+      },
+      "timing": {
+        "n_updates": 20,
+        "mean_s": 0.18766375019997666,
+        "sd_s": 0.008077669833875756,
+        "median_s": 0.18655687549994582,
+        "min_s": 0.17965881000009176,
+        "max_s": 0.21294500800013338,
+        "total_s": 3.7532750039995335,
+        "per_update_times_s": [
+          0.21294500800013338,
+          0.20140083699993738,
+          0.19238722799991592,
+          0.18649048099996435,
+          0.18673457199997756,
+          0.18711141500011763,
+          0.19153642300011597,
+          0.19027048399993873,
+          0.19307249300004514,
+          0.18295372900001894,
+          0.18444828299993787,
+          0.18874623299984705,
+          0.18308733100002428,
+          0.18084247000001596,
+          0.18079623899984654,
+          0.18307878999985405,
+          0.17965881000009176,
+          0.1866232699999273,
+          0.18030255199983003,
+          0.18078835599999366
+        ]
+      }
+    }
+  }
+}

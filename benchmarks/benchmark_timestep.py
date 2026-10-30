@@ -49,6 +49,7 @@ import scipy
 
 import pyDeltaRCM
 from pyDeltaRCM import DeltaModel
+from pyDeltaRCM.native_water import can_use_native
 
 # Cells count as "deposited" once the bed has aggraded at least this much
 # above its initial elevation.
@@ -211,6 +212,7 @@ def run_scenario(
     )
     return {
         "config": {
+            "water_backend": "rust" if can_use_native(model) else "python",
             "Length": scenario_config["Length"],
             "Width": scenario_config["Width"],
             "dx": scenario_config["dx"],
@@ -325,6 +327,7 @@ def format_markdown(results: dict) -> str:
             f"dx {cfg['dx']} m) |",
             f"| parcels | Np_water = {cfg['Np_water']}, Np_sed = {cfg['Np_sed']} |",
             f"| itermax | {cfg['itermax']} |",
+            f"| water backend | {cfg['water_backend']} |",
             f"| seed | {cfg['seed']} |",
             f"| model timestep (dt) | {cfg['model_timestep_dt_s']:.1f} s |",
             f"| warm-up | {warmup['type']}, {warmup['updates']} updates"
