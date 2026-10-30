@@ -40,6 +40,10 @@ state starts clean each time):
   the same order of magnitude.
 """
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -197,3 +201,157 @@ class TestFanMorphology:
         # stability: no net erosion outside the pinned inlet row, so every
         #   bed change in the domain is deposition (calibrated-supply check)
         assert deposit.min() >= 0.0, "spurious erosion outside the inlet row"
+
+
+_RUNNER_SOURCE = (
+    '''
+"""Fresh-process fan runner for the determinism checks (spec V6)."""
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+
+_DOWNSLOPE_WINDOW = %(downslope_window)s
+_FLOOR_SECTION = %(floor_section)s
+_DEPOSIT_THRESHOLD = %(deposit_threshold)r
+
+
+def main() -> None:
+    yaml_path = Path(sys.argv[1])
+    seed = int(sys.argv[2])
+    n_steps = int(sys.argv[3])
+    out_dir = Path(sys.argv[4])
+
+    from pyDeltaRCM.submarine import SubmarineFanModel
+
+    class BookkeepingFanModel(SubmarineFanModel):
+        # parcel-level bookkeeping compared across fresh processes: the
+        #   cumulative count of deposit-cell events per routing call
+        def route_all_sand_parcels(self):
+            super().route_all_sand_parcels()
+            self._sand_events = (
+                getattr(self, "_sand_events", 0)
+                + int(np.count_nonzero(self.Vp_dep_sand))
+            )
+
+        def route_all_mud_parcels(self):
+            super().route_all_mud_parcels()
+            self._mud_events = (
+                getattr(self, "_mud_events", 0)
+                + int(np.count_nonzero(self.Vp_dep_mud))
+            )
+
+    model = BookkeepingFanModel(input_file=yaml_path, seed=seed)
+    for _ in range(n_steps):
+        model.update()
+
+    np.savez(
+        out_dir / "results.npz",
+        eta=model.eta,
+        stage=model.stage,
+        depth=model.depth,
+    )
+    deposit = model.eta - model.eta_init
+    summary = {
+        "sand_deposit_cell_events": getattr(model, "_sand_events", 0),
+        "mud_deposit_cell_events": getattr(model, "_mud_events", 0),
+        "deposit_volume": float(deposit.sum()),
+        "downslope_mean_deposit": float(
+            deposit[_DOWNSLOPE_WINDOW, :].mean()
+        ),
+        "floor_lobe_cells": int(
+            np.count_nonzero(
+                deposit[_FLOOR_SECTION, :] > _DEPOSIT_THRESHOLD
+            )
+        ),
+    }
+    (out_dir / "results.json").write_text(json.dumps(summary))
+
+
+if __name__ == "__main__":
+    main()
+'''
+    % {
+        "downslope_window": repr(_DOWNSLOPE_WINDOW),
+        "floor_section": repr(_FLOOR_SECTION),
+        "deposit_threshold": _DEPOSIT_THRESHOLD,
+    }
+)
+
+# fresh subprocesses import pyDeltaRCM from the repo root of this test file
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _run_fresh_process(tmp_path: Path, name: str, seed: int):
+    """Run the fan runner in a fresh subprocess; return (arrays, summary)."""
+    workdir = tmp_path / name
+    workdir.mkdir()
+    yaml_path = utilities.yaml_from_dict(
+        workdir, "fan_determinism.yaml", _fan_config()
+    )
+    runner_path = workdir / "run_fan.py"
+    runner_path.write_text(_RUNNER_SOURCE)
+
+    env = dict(os.environ, PYTHONPATH=str(_REPO_ROOT))
+    proc = subprocess.run(
+        [
+            sys.executable, str(runner_path),
+            str(yaml_path), str(seed), str(_DETERMINISM_STEPS),
+            str(workdir),
+        ],
+        capture_output=True, text=True, cwd=workdir, env=env, timeout=600,
+    )
+    if proc.returncode != 0:
+        pytest.fail(
+            f"fresh-process fan run {name!r} failed:\n{proc.stderr[-2000:]}"
+        )
+
+    arrays = np.load(workdir / "results.npz")
+    summary = json.loads((workdir / "results.json").read_text())
+    return arrays, summary
+
+
+class TestFanDeterminism:
+    """V6: bitwise determinism across fresh processes; seed sensitivity."""
+
+    def test_same_seed_bitwise_identical(self, tmp_path: Path) -> None:
+        arrays_a, summary_a = _run_fresh_process(tmp_path, "seed-a", seed=0)
+        arrays_b, summary_b = _run_fresh_process(tmp_path, "seed-b", seed=0)
+
+        for name in ("eta", "stage", "depth"):
+            assert np.array_equal(arrays_a[name], arrays_b[name]), (
+                f"{name} differs between identical fresh-process runs"
+            )
+        assert summary_a == summary_b, (
+            "parcel-deposition bookkeeping differs between identical "
+            "fresh-process runs"
+        )
+
+    def test_changed_seed_differs_but_statistically_similar(
+        self, tmp_path: Path
+    ) -> None:
+        arrays_a, summary_a = _run_fresh_process(tmp_path, "seed-a", seed=0)
+        arrays_c, summary_c = _run_fresh_process(tmp_path, "seed-c", seed=1)
+
+        assert not np.array_equal(arrays_a["eta"], arrays_c["eta"]), (
+            "a changed seed produced a bitwise-identical bed"
+        )
+
+        # statistically similar: the same deposited volume (the supply rate
+        #   is seed-independent) and a downslope deposit of the same order
+        volume_a = summary_a["deposit_volume"]
+        volume_c = summary_c["deposit_volume"]
+        assert (
+            abs(volume_c - volume_a) <= _SEED_VOLUME_TOLERANCE * abs(volume_a)
+        ), (
+            f"deposited volume differs too much across seeds: "
+            f"{volume_a:.2f} vs {volume_c:.2f} m3"
+        )
+
+        downslope_a = summary_a["downslope_mean_deposit"]
+        downslope_c = summary_c["downslope_mean_deposit"]
+        assert downslope_c > 0, "changed seed produced no downslope deposit"
+        assert downslope_c <= _SEED_DOWNSLOPE_FACTOR * downslope_a
+        assert downslope_c >= downslope_a / _SEED_DOWNSLOPE_FACTOR
+
