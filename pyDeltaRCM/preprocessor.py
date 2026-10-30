@@ -834,11 +834,12 @@ class _SerialJob(_BaseJob):
         """
         # try to initialize and run the model
         try:
-            # reup the rand seed
-            self.deltamodel.logger.info(
-                f"Reset seed in serial job {self.deltamodel.seed}"
-            )
-            set_random_seed(self.deltamodel.seed)
+            if not self.deltamodel.resume_checkpoint:
+                # reup the rand seed
+                self.deltamodel.logger.info(
+                    f"Reset seed in serial job {self.deltamodel.seed}"
+                )
+                set_random_seed(self.deltamodel.seed)
 
             # run the simulation
             _dt = self.deltamodel.dt
