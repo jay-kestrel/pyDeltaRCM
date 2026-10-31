@@ -215,12 +215,7 @@ impl Fields {
     }
 
     fn next_cell(&self, index: usize, direction: usize) -> Result<usize, String> {
-        let row = index as isize / self.cols as isize + direction as isize / 3 - 1;
-        let col = index as isize % self.cols as isize + direction as isize % 3 - 1;
-        if row < 0 || col < 0 || row >= self.rows as isize || col >= self.cols as isize {
-            return Err("sediment parcel stepped outside grid; check boundary weights".into());
-        }
-        Ok(row as usize * self.cols + col as usize)
+        next_cell_index(index, direction, self.rows, self.cols)
     }
 
     fn change(&self, index: usize, residual: f32, config: &Config) -> f64 {
@@ -417,6 +412,31 @@ pub(super) fn sediment_phase<'py>(
     Ok(result)
 }
 
+fn next_cell_index(
+    index: usize,
+    direction: usize,
+    rows: usize,
+    cols: usize,
+) -> Result<usize, String> {
+    let mut row = index as isize / cols as isize + direction as isize / 3 - 1;
+    let mut col = index as isize % cols as isize + direction as isize % 3 - 1;
+    // The reference weight kernel edge-replicates the padded ghost ring, so a
+    // wet non-wall boundary cell can pick a step off the grid. Python/numba
+    // then applies numpy negative-index wrapping (e.g. a step above row 0
+    // wraps onto the outflow row); positive overflow raises IndexError there,
+    // which the kernel reports explicitly instead.
+    if row < 0 {
+        row += rows as isize;
+    }
+    if col < 0 {
+        col += cols as isize;
+    }
+    if row < 0 || col < 0 || row >= rows as isize || col >= cols as isize {
+        return Err("sediment parcel stepped outside grid; check boundary weights".into());
+    }
+    Ok(row as usize * cols + col as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,5 +452,28 @@ mod tests {
             pad_depth(&[1.0, 2.0], 1, 2),
             vec![1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0, 2.0, 2.0]
         );
+    }
+
+    #[test]
+    fn next_cell_wraps_negative_row_like_numpy() {
+        // The reference weight kernel edge-replicates the padded ghost row, so
+        // a wet non-wall row-0 cell (submarine domains) can pick an upward
+        // step. Python/numba then wraps the negative index onto the outflow
+        // row; the native kernel must reproduce that instead of erroring.
+        assert_eq!(next_cell_index(2, 1, 4, 5), Ok(3 * 5 + 2));
+    }
+
+    #[test]
+    fn next_cell_wraps_negative_col_like_numpy() {
+        // Same edge-replication reasoning for a wet non-wall col-0 cell.
+        assert_eq!(next_cell_index(5, 0, 4, 5), Ok(4));
+    }
+
+    #[test]
+    fn next_cell_still_rejects_positive_overflow() {
+        // numpy raises IndexError on positive overflow; the native kernel
+        // reports it explicitly instead.
+        assert!(next_cell_index(19, 8, 4, 5).is_err());
+        assert!(next_cell_index(2, 2, 4, 5).is_ok()); // in-grid upward step
     }
 }
