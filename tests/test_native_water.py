@@ -91,6 +91,10 @@ def test_forced_walks_and_flux_are_exact(model, monkeypatch, direction, loop):
     monkeypatch.setattr(model, "get_water_weight_array", lambda: None)
     result = _native.water_phase(*native_water.phase_inputs(model), 101)
     model.run_water_iteration()
+    # Numba is retired on this tree: the reference Python fallback preserves
+    # numba's f64 intermediate arithmetic at promoted sites (see the exact
+    # _update_absQfield regression pinning 0.44999995827674866 vs unpromoted
+    # NumPy's 0.44999998807907104), so all five fields are compared exactly.
     for name in ("qxn", "qyn", "qwn", "free_surf_walk_inds", "free_surf_flag"):
         np.testing.assert_array_equal(
             result[name], getattr(model, name), err_msg=name
