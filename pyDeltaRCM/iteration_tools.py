@@ -108,7 +108,9 @@ class iteration_tools(abc.ABC):
 
         self.H_SL = self._H_SL + self._SLR * self._dt
 
-    def log_info(self, message: str, verbosity: int = 0) -> None:
+    def log_info(
+        self, message: str, *args, verbosity: int = 0, console: bool = False
+    ) -> None:
         """Log message dependent on verbosity settings.
 
         Parameters
@@ -116,12 +118,23 @@ class iteration_tools(abc.ABC):
         message : :obj:`str`
             Message string to write to the log as info.
 
+        *args
+            Optional %-style arguments for the message, interpolated lazily
+            by the logging machinery only when the verbosity gate passes.
+
         verbosity : :obj:`int`, optional
             Verbosity threshold, whether to write the message to the log or
             not. Default value is `0`, or i.e. to always log.
+
+        console : :obj:`bool`, optional
+            Whether to mark the record for console emission. Default is
+            `False`, i.e. the record is written to the log file only.
         """
         if self._verbose >= verbosity:
-            self.logger.info(message)
+            if console:
+                self.logger.info(message, *args, extra={"console": True})
+            else:
+                self.logger.info(message, *args)
 
     def log_warning(self, message: str) -> None:
         """Log warnings.
@@ -144,12 +157,13 @@ class iteration_tools(abc.ABC):
         Reports the time to the log file, and depending on verbosity, will
         report it to stdout.
         """
-        _timemsg = "Time: {time:.{digits}f}; timestep: {timestep:g}".format(
-            time=self._time, timestep=self._time_iter, digits=1
-        )
-        self.logger.info(_timemsg)
+        _timemsg = f"Time: {self._time:.1f}; timestep: {self._time_iter}"
         if self._verbose > 0:
-            print(_timemsg)
+            # marked for the console handler, preserving the former
+            # print()'s visible text and gate exactly
+            self.logger.info(_timemsg, extra={"console": True})
+        else:
+            self.logger.info(_timemsg)
 
     def output_data(self) -> None:
         """Output grids and figures if needed."""

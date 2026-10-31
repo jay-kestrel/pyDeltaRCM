@@ -1087,6 +1087,110 @@ class TestPreprocessorRunJobs:
             pp.run_jobs()
 
 
+class TestPreprocessorConsoleRouting:
+    """Console-routing contracts for the preprocessor's marked records.
+
+    The preprocessor logs to a namespaced, non-propagating logger with a
+    temporary console handler; these tests pin the visible stdout contract
+    (spec verification row 5) and that status records flow through the
+    logging framework.
+    """
+
+    def test_serial_run_jobs_stdout_empty_at_verbose_zero(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        # every preprocessor status message is gated at verbosity >= 1,
+        #   and a successful serial batch emits no failure statuses, so
+        #   stdout must be empty at verbose=0
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"out_dir": tmp_path / "out_dir", "timesteps": 1, "verbose": 0},
+        )
+        pp = preprocessor.Preprocessor(p)
+
+        pp.run_jobs()
+
+        assert pp._is_completed is True
+        assert capsys.readouterr().out == ""
+
+    def test_build_failure_status_console_visible_once_at_verbose_zero(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        # the job-build failure status line is ungated: it must reach
+        #   stdout exactly once even at verbose=0, with unchanged text
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {
+                "out_dir": tmp_path / "out_dir",
+                "timesteps": 1,
+                "verbose": 0,
+                "matrix": {"Np_water": [10, 2.5]},
+            },
+        )
+        pp = preprocessor.Preprocessor(p)
+
+        with pytest.raises(RuntimeError, match="1 job"):
+            pp.run_jobs()
+
+        out = capsys.readouterr().out
+        assert out.count("job: 1, stage: 0, code: 1") == 1
+
+    def test_starting_job_status_console_visible_once_at_verbose_one(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        # the gated "Starting job" status is console-visible at verbosity
+        #   >= 1 and appears exactly once per job; the model's own Time
+        #   lines may also appear, so only the status text is counted
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"out_dir": tmp_path / "out_dir", "timesteps": 1, "verbose": 1},
+        )
+        pp = preprocessor.Preprocessor(p)
+
+        pp.run_jobs()
+
+        out = capsys.readouterr().out
+        assert out.count("Starting job 0") == 1
+
+    def test_preprocessor_records_flow_through_logging(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        # propagation is disabled by design (library safety), so records
+        #   cannot be observed through the root logger or caplog; attach
+        #   a capturing handler to the preprocessor logger directly and
+        #   assert the status records flow through the logging framework
+        p = utilities.yaml_from_dict(
+            tmp_path,
+            "input.yaml",
+            {"out_dir": tmp_path / "out_dir", "timesteps": 1, "verbose": 1},
+        )
+        pp = preprocessor.Preprocessor(p)
+
+        records = []
+
+        class _CaptureHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        capture = _CaptureHandler(level=logging.DEBUG)
+        logger = logging.getLogger("pyDeltaRCM.preprocessor")
+        logger.addHandler(capture)
+        try:
+            pp.run_jobs()
+        finally:
+            logger.removeHandler(capture)
+
+        starting = [r for r in records if r.getMessage() == "Starting job 0"]
+        assert len(starting) == 1
+        assert starting[0].name == "pyDeltaRCM.preprocessor"
+        assert starting[0].levelno == logging.INFO
+        # the same record was console-rendered with the bare formatter
+        assert "Starting job 0" in capsys.readouterr().out
+
+
 @mock.patch.multiple(pyDeltaRCM.preprocessor._BaseJob, __abstractmethods__=set())
 class TestBaseJob:
     """

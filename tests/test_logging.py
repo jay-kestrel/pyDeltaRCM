@@ -42,7 +42,8 @@ class TestLogModelTime:
 
     def test_verbose_printing_0(self, tmp_path: Path, capsys) -> None:
         """
-        This test should create the log, and then print nothing at all.
+        At verbose 0, the time is recorded in the log file and stdout
+        stays empty.
         """
         file_name = 'user_parameters.yaml'
         p, f = utilities.create_temporary_file(tmp_path, file_name)
@@ -51,21 +52,61 @@ class TestLogModelTime:
         f.close()
         _delta = DeltaModel(input_file=p)
 
-        _delta.logger = mock.MagicMock()
-
         _delta.log_model_time()
-
-        # time is logged regardless of verbosity
-        _calls = [mock.call('Time: 0.0; timestep: 0')]
-        _delta.logger.info.assert_has_calls(_calls)
 
         # stdout is empty because verbose 0
         captd = capsys.readouterr()
         assert captd.out == ''
 
+        # time is logged regardless of verbosity
+        _logs = glob.glob(os.path.join(_delta.prefix, '*.log'))
+        with open(_logs[0], 'r') as _logfile:
+            _lines = ' '.join(_logfile.readlines())
+        assert 'Time: 0.0; timestep: 0' in _lines
+
     def test_verbose_printing_1(self, tmp_path: Path, capsys) -> None:
         """
-        This test should create the log, and then print nothing at all.
+        At verbose 1, stdout carries exactly the terse Time lines.
+        """
+        file_name = 'user_parameters.yaml'
+        p, f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(f, 'out_dir', tmp_path / 'out_dir')
+        utilities.write_parameter_to_file(f, 'verbose', 1)
+        f.close()
+        _delta = DeltaModel(input_file=p)
+
+        # initialization reports the time exactly once, with no other
+        # stdout traffic
+        captd = capsys.readouterr()
+        assert captd.out == 'Time: 0.0; timestep: 0\n'
+
+        # and each timestep report adds exactly one identical line
+        _delta.log_model_time()
+        captd = capsys.readouterr()
+        assert captd.out == 'Time: 0.0; timestep: 0\n'
+
+    def test_verbose_printing_2(self, tmp_path: Path, capsys) -> None:
+        """
+        At verbose 2, stdout carries exactly the terse Time lines.
+        """
+        file_name = 'user_parameters.yaml'
+        p, f = utilities.create_temporary_file(tmp_path, file_name)
+        utilities.write_parameter_to_file(f, 'out_dir', tmp_path / 'out_dir')
+        utilities.write_parameter_to_file(f, 'verbose', 2)
+        f.close()
+        _delta = DeltaModel(input_file=p)
+
+        captd = capsys.readouterr()
+        assert captd.out == 'Time: 0.0; timestep: 0\n'
+
+        _delta.log_model_time()
+        captd = capsys.readouterr()
+        assert captd.out == 'Time: 0.0; timestep: 0\n'
+
+    def test_verbose_1_console_marked_record(self, tmp_path: Path) -> None:
+        """
+        At verbose 1, the time record is emitted with the console mark that
+        the console handler filters on.
         """
         file_name = 'user_parameters.yaml'
         p, f = utilities.create_temporary_file(tmp_path, file_name)
@@ -75,39 +116,11 @@ class TestLogModelTime:
         _delta = DeltaModel(input_file=p)
 
         _delta.logger = mock.MagicMock()
-
         _delta.log_model_time()
 
-        # time is logged regardless of verbosity
-        _calls = [mock.call('Time: 0.0; timestep: 0')]
-        _delta.logger.info.assert_has_calls(_calls)
-
-        # stdout has times because verbose 1
-        captd = capsys.readouterr()
-        assert 'Time: 0.0' in captd.out  # if verbose >= 1
-
-    def test_verbose_printing_2(self, tmp_path: Path, capsys) -> None:
-        """
-        This test should create the log, and then print nothing at all.
-        """
-        file_name = 'user_parameters.yaml'
-        p, f = utilities.create_temporary_file(tmp_path, file_name)
-        utilities.write_parameter_to_file(f, 'out_dir', tmp_path / 'out_dir')
-        utilities.write_parameter_to_file(f, 'verbose', 2)
-        f.close()
-        _delta = DeltaModel(input_file=p)
-
-        _delta.logger = mock.MagicMock()
-
-        _delta.log_model_time()
-
-        # time is logged regardless of verbosity
-        _calls = [mock.call('Time: 0.0; timestep: 0')]
-        _delta.logger.info.assert_has_calls(_calls)
-
-        # stdout is empty because verbose 2
-        captd = capsys.readouterr()
-        assert 'Time: 0.0' in captd.out  # if verbose >= 1
+        _delta.logger.info.assert_called_with(
+            'Time: 0.0; timestep: 0', extra={'console': True}
+        )
 
 
 class TestLoggerIntegratedDuringInitialization:
