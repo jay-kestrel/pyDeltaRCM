@@ -26,7 +26,6 @@ dependencies = [
     "scipy",
     "netCDF4",
     "pyyaml",
-    "numba>=0.60",
     "numpy>=1.22"
 ]
 readme = { file = "README.rst", content-type = "text/x-rst" }

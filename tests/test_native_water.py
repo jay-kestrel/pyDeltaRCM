@@ -2,9 +2,14 @@
 
 import numpy as np
 import pytest
-from numba import config as numba_config
 
-from pyDeltaRCM import DeltaModel, _native, native_water, shared_tools, water_tools
+from pyDeltaRCM import (
+    DeltaModel,
+    _native,
+    native_water,
+    shared_tools,
+    water_tools,
+)
 
 
 @pytest.fixture
@@ -30,7 +35,9 @@ def model(tmp_path):
 
 @pytest.mark.parametrize("sea_level", [0.0, 0.25])
 @pytest.mark.parametrize("evolved", [False, True])
-def test_surface_kernels_equal_reference_on_identical_walks(model, sea_level, evolved):
+def test_surface_kernels_equal_reference_on_identical_walks(
+    model, sea_level, evolved
+):
     if evolved:
         rng = np.random.default_rng(42)
         for name in ("uw", "ux", "uy", "depth"):
@@ -64,11 +71,8 @@ def test_surface_kernels_equal_reference_on_identical_walks(model, sea_level, ev
         model._Nsmooth,
         model._Csmooth,
     )
-    if numba_config.DISABLE_JIT:
-        # NumPy uses a pairwise float32 sum; Numba (and Rust) sum in order.
-        np.testing.assert_allclose(result["Hsmth"], smoothed, rtol=1e-6, atol=0)
-    else:
-        np.testing.assert_array_equal(result["Hsmth"], smoothed)
+    # NumPy uses a pairwise float32 sum; Rust sums sequentially.
+    np.testing.assert_allclose(result["Hsmth"], smoothed, rtol=1e-6, atol=0)
 
 
 @pytest.mark.parametrize(
@@ -87,36 +91,20 @@ def test_forced_walks_and_flux_are_exact(model, monkeypatch, direction, loop):
     monkeypatch.setattr(model, "get_water_weight_array", lambda: None)
     result = _native.water_phase(*native_water.phase_inputs(model), 101)
     model.run_water_iteration()
-    # Paths never depend on flux rounding (one-hot weights, no feedback),
-    # so they are bit-compared in both numba modes. The flux fields are
-    # bit-compared under JIT; the no-JIT numpy fallback casts each flux
-    # operand to f32 before adding, while numba (and the Rust port)
-    # accumulate in f64 and cast on store -- per-parcel chains of a few
-    # deposits diverge by 1 ulp (3 parcels from one inlet: 0.449999958 vs
-    # 0.449999988), the same relaxed comparison the surface-kernel test
-    # uses below.
-    np.testing.assert_array_equal(
-        result["free_surf_walk_inds"], model.free_surf_walk_inds,
-        err_msg="free_surf_walk_inds",
-    )
-    np.testing.assert_array_equal(
-        result["free_surf_flag"], model.free_surf_flag, err_msg="free_surf_flag"
-    )
-    flux_fields = ("qxn", "qyn", "qwn")
-    if numba_config.DISABLE_JIT:
-        for name in flux_fields:
-            np.testing.assert_allclose(
-                result[name], getattr(model, name), rtol=1e-6, atol=0, err_msg=name
-            )
-    else:
-        for name in flux_fields:
-            np.testing.assert_array_equal(
-                result[name], getattr(model, name), err_msg=name
-            )
+    # Numba is retired on this tree: the reference Python fallback preserves
+    # numba's f64 intermediate arithmetic at promoted sites (see the exact
+    # _update_absQfield regression pinning 0.44999995827674866 vs unpromoted
+    # NumPy's 0.44999998807907104), so all five fields are compared exactly.
+    for name in ("qxn", "qyn", "qwn", "free_surf_walk_inds", "free_surf_flag"):
+        np.testing.assert_array_equal(
+            result[name], getattr(model, name), err_msg=name
+        )
 
 
 @pytest.mark.parametrize("count", [1, 2, 20])
-def test_duplicate_inlet_parcels_contribute_all_discharge(model, monkeypatch, count):
+def test_duplicate_inlet_parcels_contribute_all_discharge(
+    model, monkeypatch, count
+):
     """#10 accumulates ghost-node flux for every parcel, not unique starts."""
     model._stepmax = 0  # isolate the inlet injection from subsequent steps
     start = int(model.inlet[0])
@@ -132,6 +120,22 @@ def test_duplicate_inlet_parcels_contribute_all_discharge(model, monkeypatch, co
     assert result["qwn"].ravel()[start] == expected
 
 
+def test_absolute_flux_preserves_numba_arithmetic():
+    # Preserve numba/Rust float64 intermediates before each float32 store.
+    # Pure NumPy scalar promotion instead produces 0.44999998807907104.
+    actual = water_tools._update_absQfield(
+        np.array([0.225], dtype=np.float32),
+        np.ones(3),
+        np.zeros(3, dtype=np.int64),
+        np.ones(3, dtype=bool),
+        0.15,
+        1.0,
+    )
+    np.testing.assert_array_equal(
+        actual, np.array([0.44999995827674866], dtype=np.float32)
+    )
+
+
 def test_native_repeat_is_bit_identical(model):
     args = native_water.phase_inputs(model)
     first = _native.water_phase(*args, 919)
@@ -140,16 +144,19 @@ def test_native_repeat_is_bit_identical(model):
         np.testing.assert_array_equal(first[name], second[name])
 
 
-@pytest.mark.skipif(
-    numba_config.DISABLE_JIT,
-    reason="Existing checkpoint helpers persist the Numba RNG, not NumPy's no-JIT stream",
-)
 def test_checkpoint_stream_replays_native_phase(model):
     starts = model.start_indices.copy()
     stage = model.stage.copy()
     state = shared_tools.get_random_state()
     native_water.run_water_phase(model)
-    names = ("free_surf_walk_inds", "free_surf_flag", "qxn", "qyn", "qwn", "Hnew")
+    names = (
+        "free_surf_walk_inds",
+        "free_surf_flag",
+        "qxn",
+        "qyn",
+        "qwn",
+        "Hnew",
+    )
     expected = {name: getattr(model, name).copy() for name in names}
     expected_state = shared_tools.get_random_state()
     model.stage = stage
@@ -182,9 +189,12 @@ def test_dispatch_and_reference_switch(model, monkeypatch):
         "hook_run_water_iteration",
         "hook_init_water_iteration",
         "init_water_iteration",
+        "get_water_weight_array",
     ],
 )
-def test_overridden_phase_methods_keep_python_semantics(model, monkeypatch, name):
+def test_overridden_phase_methods_keep_python_semantics(
+    model, monkeypatch, name
+):
     monkeypatch.setenv("PYDELTARCM_NATIVE", "1")
     monkeypatch.setattr(model, name, lambda *args: None)
     assert not native_water.can_use_native(model)
@@ -193,6 +203,35 @@ def test_overridden_phase_methods_keep_python_semantics(model, monkeypatch, name
 @pytest.mark.parametrize("field", native_water.FLOAT_FIELDS)
 def test_custom_precision_uses_reference(model, monkeypatch, field):
     monkeypatch.setenv("PYDELTARCM_NATIVE", "1")
+    setattr(model, field, getattr(model, field).astype(np.float64))
+    assert not native_water.can_use_native(model)
+
+
+def test_fused_weights_preserve_the_entire_phase(model):
+    expected = _native.water_phase(*native_water.phase_inputs(model), 918)
+    actual = _native.water_phase(
+        *native_water.phase_inputs(model, construct_weights=True),
+        918,
+        weight_inputs=native_water.weight_inputs(model),
+    )
+    for name in expected:
+        np.testing.assert_array_equal(
+            actual[name], expected[name], err_msg=name
+        )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "qx",
+        "qy",
+        "mod_water_weight",
+        "ivec_flat",
+        "jvec_flat",
+        "distances_flat",
+    ],
+)
+def test_custom_weight_precision_uses_reference(model, field):
     setattr(model, field, getattr(model, field).astype(np.float64))
     assert not native_water.can_use_native(model)
 

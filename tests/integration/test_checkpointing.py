@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 from netCDF4 import Dataset
-from numba import config as numba_config
 
 import unittest.mock as mock
 
@@ -53,16 +52,10 @@ class TestCheckpointingIntegrations:
     checkpointing-related issues from model issues.
     """
 
-    # Both tests assert exact stream replay after resume. The checkpoint
-    # helpers persist the numba RNG mirror, but under NUMBA_DISABLE_JIT the
-    # runtime draws come from numpy's legacy global stream, which the
-    # checkpoint does not capture -- the same documented limitation as
-    # test_native_water.py's skipif. Making pack/unpack_rng_state mode-aware
-    # is the real fix; until then these cannot pass without JIT.
-    @pytest.mark.skipif(
-        numba_config.DISABLE_JIT,
-        reason="Existing checkpoint helpers persist the Numba RNG, not NumPy's no-JIT stream",
-    )
+    # Both tests assert exact stream replay after resume. The thread-local
+    # NumPy MT19937 generator's state is captured by the checkpoint
+    # helpers, so replay holds unconditionally -- numba's no-JIT stream
+    # divergence no longer exists on this tree.
     def test_simple_checkpoint(self, tmp_path: Path) -> None:
         """Test checkpoint vs a base run.
 
@@ -129,10 +122,6 @@ class TestCheckpointingIntegrations:
         assert np.all(resumeModel2.sand_frac == resumeModel.sand_frac)
         assert np.all(resumeModel2.active_layer == resumeModel.active_layer)
 
-    @pytest.mark.skipif(
-        numba_config.DISABLE_JIT,
-        reason="Existing checkpoint helpers persist the Numba RNG, not NumPy's no-JIT stream",
-    )
     def test_checkpoint_round_trips_rng_stream(self, tmp_path: Path) -> None:
         """Test save → resume reproduces the exact random state and stream.
 
@@ -611,10 +600,6 @@ class TestCheckpointingIntegrations:
         # close netcdf file
         out_fin.close()
 
-    @pytest.mark.skipif(
-        numba_config.DISABLE_JIT,
-        reason="Existing checkpoint helpers persist the Numba RNG, not NumPy's no-JIT stream",
-    )
     def test_serial_resume_continues_rng_state(self, tmp_path: Path) -> None:
         """Test that a serial resumed run continues the checkpointed RNG state.
 

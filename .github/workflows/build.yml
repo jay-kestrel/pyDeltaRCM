@@ -132,12 +132,9 @@ jobs:
       run: |
         "$VIRTUAL_PY" -m pip install -e .
 
-    - name: Disable jitted for coverage
-      shell: bash
-      run: |
-        echo "DISABLE_JIT: 1" > .numba_config.yaml
-
     - name: Test with pytest
+      env:
+        PYDELTARCM_NATIVE: "0"
       shell: bash
       run: |
         "$VIRTUAL_PY" -m pytest --ignore=tests/integration/ --cov=pyDeltaRCM/ --cov-report=xml --mpl --mpl-baseline-path=tests/imgs_baseline

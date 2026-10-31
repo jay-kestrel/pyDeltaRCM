@@ -1,5 +1,5 @@
 import numpy as np
-from numba import njit
+# Reference kernels intentionally remain ordinary Python/NumPy functions.
 import abc
 
 from pyDeltaRCM.shared_tools import (
@@ -630,7 +630,6 @@ class water_tools(abc.ABC):
         return wgt_array
 
 
-@njit
 def _get_weight_at_cell_water(
     ind,
     weight_sfc,
@@ -736,7 +735,6 @@ def _get_weight_at_cell_water(
 # @njit('(float32[:,:], float32[:,:], int64[:,:], float32[:,:], float32[:,:],'
 #       'float32[:], float32[:], float32[:],'
 #       'float64, float64, float64)')
-@njit
 def _get_water_weight_array(
     depth,
     stage,
@@ -807,7 +805,6 @@ def _get_water_weight_array(
     return water_weights
 
 
-@njit("int64[:](int64[:], float64[:,:])")
 def _choose_next_directions(inds: np.ndarray, water_weights: np.ndarray) -> np.ndarray:
     """Get new cell locations, based on water weights.
 
@@ -849,7 +846,6 @@ def _choose_next_directions(inds: np.ndarray, water_weights: np.ndarray) -> np.n
     return next_direction
 
 
-@njit("int64[:](int64[:], int64[:], int64[:])")
 def _calculate_new_inds(current_inds: np.ndarray, new_direction, ravel_walk):
     """Calculate the new location (current_inds) of parcels.
 
@@ -908,7 +904,6 @@ def _inject_inlet_discharge(
     qwn.flat[start_inlets] += start_counts * Qp_water / dx / 2
 
 
-@njit
 def _check_for_loops(
     free_surf_walk_inds: np.ndarray,
     new_inds,
@@ -1047,7 +1042,6 @@ def _check_for_loops(
     return new_inds, looped
 
 
-@njit
 def _update_dirQfield(qfield, dist, inds, astep, dirstep):
     """Update unit vector of water flux in x or y."""
     for i, ii in enumerate(inds):
@@ -1056,16 +1050,15 @@ def _update_dirQfield(qfield, dist, inds, astep, dirstep):
     return qfield
 
 
-@njit
 def _update_absQfield(qfield, dist, inds, astep, Qp_water, dx):
     """Update norm of water flux vector."""
     for i, ii in enumerate(inds):
         if astep[i]:
-            qfield[ii] += Qp_water / dx / 2
+            # Preserve numba's float64 intermediate before the float32 store.
+            qfield[ii] = float(qfield[ii]) + Qp_water / dx / 2
     return qfield
 
 
-@njit
 def _accumulate_free_surface_walks(
     free_surf_walk_inds: np.ndarray,
     free_surf_flag: np.ndarray,
@@ -1172,7 +1165,6 @@ def _accumulate_free_surface_walks(
     return sfc_visit, sfc_sum
 
 
-@njit
 def _smooth_free_surface(Hin, cell_type, Nsmooth: int, Csmooth: int):
     """Smooth the free surface.
 

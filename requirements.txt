@@ -5,9 +5,4 @@ matplotlib>=3.6.1
 scipy>=1.5
 netCDF4
 pyyaml>=5.1
-# numba declares a narrow supported-numpy range, so an unpinned resolve
-# can pair numba with a numpy it cannot import against (demonstrated
-# break: numba 0.60 against a numpy 1.13.0 base). Floor both so pip
-# cannot produce that pairing.
-numba>=0.60
 numpy>=1.22

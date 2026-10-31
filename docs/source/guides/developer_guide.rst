@@ -243,7 +243,7 @@ Pull requests and pushes run through two GitHub Actions workflows, ``build.yml``
 The ``build.yml`` workflow defines three jobs:
 
 * **test** — a matrix of three operating systems (Ubuntu, macOS, Windows) and Python 3.11, 3.12, and 3.13, which installs the package and runs ``python -m pytest --mpl --mpl-baseline-path=tests/imgs_baseline``. Because pytest's ``addopts`` include ``--doctest-modules`` (see `The --doctest-modules gotcha`_), this job executes docstring examples too.
-* **coverage** — the same three operating systems, pinned to Python 3.13, running pytest with ``tests/integration/`` ignored and coverage uploaded to Codecov. JIT compilation is disabled for coverage runs by writing ``DISABLE_JIT: 1`` to ``.numba_config.yaml`` (see `Coverage without JIT`_).
+* **coverage** — the same three operating systems, pinned to Python 3.13, running pytest with ``tests/integration/`` ignored and coverage uploaded to Codecov. Python reference coverage is selected with ``PYDELTARCM_NATIVE=0`` (see `Coverage without JIT`_).
 * **docs** — Ubuntu on Python 3.13, installing the LaTeX packages needed for the high-resolution plot output (``latexmk``, ``texlive-latex-recommended``, ``texlive-latex-extra``, ``texlive-fonts-recommended``, ``dvipng``), then running ``(cd docs && make docs)``. This job builds the Sphinx doctests and the HTML site; on failure, the build log is uploaded as an artifact.
 
 The ``benchmark.yml`` workflow (a fork addition, see :doc:`/meta/about_this_fork`) runs the benchmark harness in smoke mode — ``python benchmarks/benchmark_timestep.py --smoke`` — on pull requests and on pushes to ``develop``, and uploads the results as an artifact. See :doc:`benchmarking` for what the smoke preset runs.
@@ -282,7 +282,14 @@ When touching docstrings or their examples, run pytest — not only ``make docs`
 Coverage without JIT
 ====================
 
-The coverage job disables numba's just-in-time compilation so that pure-Python line coverage is measured. Locally, the same behavior is available by writing ``DISABLE_JIT: 1`` into an (untracked) ``.numba_config.yaml`` file at the repository root before running pytest.
+Numba is no longer a runtime dependency. ``DISABLE_JIT``,
+``NUMBA_DISABLE_JIT``, and ``.numba_config.yaml`` are retired and have no
+runtime effect. Use ``PYDELTARCM_NATIVE=0`` for pure-Python water and
+sediment routing, including coverage runs. The former no-JIT water
+contracts now run unconditionally; checkpoint replay is no longer skipped.
+The reference RNG retains the legacy MT19937 checkpoint representation,
+while native phases use independently seeded Xoshiro streams. Native
+repeatability is exact; cross-backend trajectories are compared statistically.
 
 Release flow
 ============

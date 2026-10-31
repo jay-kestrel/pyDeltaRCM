@@ -33,6 +33,7 @@ def can_use_native(model):
         "check_size_of_indices_matrix",
         "compute_free_surface",
         "finalize_free_surface",
+        "get_water_weight_array",
     ):
         if getattr(getattr(model, name), "__func__", None) is not getattr(
             water_tools, name
@@ -49,7 +50,18 @@ def can_use_native(model):
             return False
     # Keep custom numerical precision and nonstandard walk geometry on the
     # reference path rather than silently converting the model's semantics.
-    if any(getattr(model, name).dtype != np.float32 for name in FLOAT_FIELDS):
+    weight_fields = (
+        "qx",
+        "qy",
+        "mod_water_weight",
+        "ivec_flat",
+        "jvec_flat",
+        "distances_flat",
+    )
+    if any(
+        getattr(model, name).dtype != np.float32
+        for name in FLOAT_FIELDS + weight_fields
+    ):
         return False
     if not np.array_equal(model.iwalk_flat, [-1, 0, 1, -1, 0, 1, -1, 0, 1]):
         return False
@@ -70,7 +82,7 @@ def can_use_native(model):
     return True
 
 
-def phase_inputs(model):
+def phase_inputs(model, construct_weights=False):
     """Build the typed phase arguments; also used by differential tests."""
     native = importlib.import_module("pyDeltaRCM._native")
     config = native.WaterConfig(
@@ -88,22 +100,52 @@ def phase_inputs(model):
         model._Csmooth,
     )
     return (
-        np.ascontiguousarray(model.water_weights),
+        None
+        if construct_weights
+        else np.ascontiguousarray(model.water_weights),
         np.ascontiguousarray(model.start_indices, dtype=np.int64),
         np.ascontiguousarray(model.cell_type, dtype=np.int64),
-        *(np.ascontiguousarray(getattr(model, name)) for name in FLOAT_FIELDS[:6]),
+        *(
+            np.ascontiguousarray(getattr(model, name))
+            for name in FLOAT_FIELDS[:6]
+        ),
         config,
+    )
+
+
+def weight_inputs(model):
+    """Retain NumPy's power rounding without its per-cell dispatch overhead."""
+    factor = (model.depth * model.mod_water_weight) ** model.theta_water
+    return (
+        np.ascontiguousarray(factor),
+        *(
+            np.ascontiguousarray(getattr(model, name))
+            for name in (
+                "qx",
+                "qy",
+                "ivec_flat",
+                "jvec_flat",
+                "distances_flat",
+            )
+        ),
+        model.dry_depth,
+        model.gamma,
     )
 
 
 def run_water_phase(model):
     """Route and compute the surface with exactly one native phase call."""
     native = importlib.import_module("pyDeltaRCM._native")
-    model.get_water_weight_array()
+    model.log_info("Computing water weight array", verbosity=2)
     # Draw from the existing checkpointed stream once per iteration. No new
     # persistent RNG state is needed to resume a model exactly from checkpoint.
     seed = int(shared_tools.get_random_uniform(2**53))
-    result = native.water_phase(*phase_inputs(model), seed)
+    result = native.water_phase(
+        *phase_inputs(model, construct_weights=True),
+        seed,
+        weight_inputs=weight_inputs(model),
+    )
+    model.water_weights = result["water_weights"]
     for name in ("qxn", "qyn", "qwn", "free_surf_walk_inds", "free_surf_flag"):
         setattr(model, name, result[name])
     model.hook_compute_free_surface()

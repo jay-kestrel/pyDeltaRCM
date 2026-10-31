@@ -226,7 +226,6 @@ def git_commit() -> str | None:
 
 def collect_metadata(fixture_dir: Path, args: argparse.Namespace) -> dict:
     """Versions, platform, and fixture provenance for results.json."""
-    import numba
     import scipy
 
     import pyDeltaRCM
@@ -240,7 +239,7 @@ def collect_metadata(fixture_dir: Path, args: argparse.Namespace) -> dict:
         "pyDeltaRCM_version": pyDeltaRCM.__version__,
         "pyDeltaRCM_git_commit": git_commit(),
         "numpy_version": np.__version__,
-        "numba_version": numba.__version__,
+        "numba_version": None,
         "scipy_version": scipy.__version__,
         "fixture": args.fixture,
         "fixture_source_config_sha256": manifest["source_config_sha256"],
