@@ -1,0 +1,29 @@
+# 06_subsiding_basin — accommodation-driven reorganization.
+# Same grid/seed as 01_classic_birdsfoot, plus subsidence from the first step.
+# Subsidence applies outside the first L0 rows (the basin), as rate * dt per step:
+#   3.0e-9 m/s * 25000 s = 7.5e-5 m/step; ~7.6 cm over the run.
+# Derived (not configurable): Qw0 = 1250 m^3/s, Qs0 = 1.25 m^3/s, dt = 25000 s.
+# gamma = g*S0*dx/u0^2 = 0.0736 <= 0.1 (no warning).
+# Expected morphology: compensation cycles, avulsion (subsidence signal is small at
+# this timescale; the run is 1.4x the anchor's so the final bed is distinct -- see README).
+Length: 4000.0
+Width: 4000.0
+dx: 50.0
+N0_meters: 250.0      # exactly 5 cells
+L0_meters: 150.0      # exactly 3 cells
+u0: 1.0
+h0: 5.0
+S0: 0.00015
+C0_percent: 0.1
+f_bedload: 0.5
+Np_water: 500
+Np_sed: 500
+toggle_subsidence: true
+subsidence_rate: 3.0e-9   # m/s of model time
+start_subsidence: 0.0     # active from the first step ("early")
+seed: 14
+save_eta_figs: true
+save_figs_sequential: true
+save_dt: 1400000      # a figure every 56 steps; the final save lands on the last step
+out_dir: runs/subsiding_basin     # replaced by the harness with a per-run temp dir
+timesteps: 1008       # 1008 * 25000 s = 2.52e7 s ~ 0.80 model yr; calibrated to budget

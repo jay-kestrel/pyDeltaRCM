@@ -1,0 +1,25 @@
+# 04_narrow_jet — strong, narrow inflow.
+# Same grid/seed as 01_classic_birdsfoot; u0 1.75, h0 7.0, N0_meters 150 (exactly 3 cells).
+# Derived (not configurable): Qw0 = u0*h0*N0*dx = 1837.5 m^3/s,
+#   V0 = h0*dx^2 = 17500 m^3, dVs = 0.1*N0^2*V0 = 15750 m^3,
+#   Qs0 = 1.8375 m^3/s, dt = dVs/Qs0 = 8571.43 s.
+# gamma = g*S0*dx/u0^2 = 0.0240 <= 0.1 (no warning).
+# Expected morphology: elongated incised channel.
+Length: 4000.0
+Width: 4000.0
+dx: 50.0
+N0_meters: 150.0      # exactly 3 cells: no snap warning
+L0_meters: 150.0      # exactly 3 cells: no snap warning
+u0: 1.75
+h0: 7.0
+S0: 0.00015
+C0_percent: 0.1
+f_bedload: 0.5
+Np_water: 500
+Np_sed: 500
+seed: 14
+save_eta_figs: true
+save_figs_sequential: true
+save_dt: 300000       # ~a figure every 35 steps
+out_dir: runs/narrow_jet          # replaced by the harness with a per-run temp dir
+timesteps: 720        # 720 * 8571.43 s = 6.17e6 s ~ 0.20 model yr; calibrated to budget

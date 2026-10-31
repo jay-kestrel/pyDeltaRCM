@@ -1,0 +1,21 @@
+# 00_smoke — fast end-to-end path for CI, the docs build, and harness verification.
+# 40x40 grid, 300+300 parcels, all savers off, ~1 model day. Budget: <= 20 s warm.
+# Derived (not configurable): N0 = 3 cells, V0 = h0*dx^2 = 6250 m^3,
+#   dVs = 0.1*N0^2*V0 = 5625 m^3, Qw0 = u0*h0*N0*dx = 375 m^3/s,
+#   Qs0 = Qw0*C0 = 0.375 m^3/s, dt = dVs/Qs0 = 15000 s.
+# gamma = g*S0*dx/u0^2 = 0.0736 <= 0.1 (no warning).
+Length: 2000.0        # exact multiple of dx: no snap warning
+Width: 2000.0         # exact multiple of dx: no snap warning
+dx: 50.0
+N0_meters: 150.0      # exactly 3 cells: no snap warning
+L0_meters: 100.0      # exactly 2 cells: no snap warning
+u0: 1.0
+h0: 2.5
+S0: 0.00015
+C0_percent: 0.1
+f_bedload: 0.5
+Np_water: 300
+Np_sed: 300
+seed: 14              # fixed seed: determinism asserted by test
+out_dir: runs/smoke   # replaced by the harness with a per-run temp dir
+timesteps: 6          # 6 * 15000 s = 90000 s ~ 1.04 model days; harness owns the loop
