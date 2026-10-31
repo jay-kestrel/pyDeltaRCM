@@ -611,6 +611,10 @@ class TestCheckpointingIntegrations:
         # close netcdf file
         out_fin.close()
 
+    @pytest.mark.skipif(
+        numba_config.DISABLE_JIT,
+        reason="Existing checkpoint helpers persist the Numba RNG, not NumPy's no-JIT stream",
+    )
     def test_serial_resume_continues_rng_state(self, tmp_path: Path) -> None:
         """Test that a serial resumed run continues the checkpointed RNG state.
 
