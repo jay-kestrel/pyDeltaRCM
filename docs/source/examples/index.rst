@@ -70,3 +70,4 @@ Working with the Preprocessor
    :maxdepth: 1
 
    custom_class_preprocessor
+   scenario_grid
