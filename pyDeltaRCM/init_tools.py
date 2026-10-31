@@ -178,8 +178,10 @@ class init_tools(abc.ABC):
         ``dm.logger.propagate = True``. Re-initialization replaces the file
         handler rather than stacking, and :obj:`finalize` releases it.
         """
-        # single clock read names the log file for this initialization
+        # single clock read + one counter draw name this initialization;
+        # the instance id (not clock luck) disambiguates concurrent runs
         timestamp = time_lib.strftime("%Y%m%d-%H%M%S")
+        _instance_id = next(_INSTANCE_COUNT)
 
         # release the file handler from a previous initialization on this
         # instance, so re-initialization replaces rather than stacks
@@ -189,7 +191,7 @@ class init_tools(abc.ABC):
             self._log_fh = None
 
         self.logger = logging.getLogger(
-            f"pyDeltaRCM.model.{next(_INSTANCE_COUNT):03d}")
+            f"pyDeltaRCM.model.{_instance_id:03d}")
         self.logger.setLevel(logging.DEBUG)
         self.logger.propagate = False
 
@@ -202,7 +204,9 @@ class init_tools(abc.ABC):
             _h.close()
 
         # create the logging file handler
-        log_file_name = f"pyDeltaRCM_{timestamp}.log"
+        # the log file carries the same instance id as the logger name, so
+        # same-second initializations (even sharing an out_dir) never merge
+        log_file_name = f"pyDeltaRCM_{timestamp}_{_instance_id:03d}.log"
         fh = logging.FileHandler(
             os.path.join(self.prefix_abspath, log_file_name)
         )

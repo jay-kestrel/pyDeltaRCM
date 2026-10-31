@@ -285,6 +285,63 @@ class TestLoggerCoreBehavior:
         assert len(_fhs) == 1
         assert _old_fh.stream is None
 
+    def test_same_second_instances_write_distinct_log_files(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Two instances initialized in the same second must write distinct
+        log files: uniqueness comes from the per-instance counter, not from
+        clock luck, and each instance's records stay isolated in its file."""
+
+        class _StubModel:
+            """Exposes only the attributes that init_logger requires."""
+
+            __pyDeltaRCM_version__ = 'test'
+            _verbose = 0
+
+            def __init__(self, out_dir: Path) -> None:
+                os.makedirs(out_dir, exist_ok=True)
+                self.prefix_abspath = str(out_dir)
+
+            def log_info(self, message: str, verbosity: int = 0) -> None:
+                if self._verbose >= verbosity:
+                    self.logger.info(message)
+
+        # pin the clock so both initializations land in the same second
+        # deterministically, however fast the host executes them
+        monkeypatch.setattr(
+            "pyDeltaRCM.init_tools.time_lib.strftime",
+            lambda *a, **k: "20261030-120000",
+        )
+
+        stub_a = _StubModel(tmp_path / 'out_dir')
+        stub_b = _StubModel(tmp_path / 'out_dir')  # same out_dir, same second
+
+        init_tools.init_logger(stub_a)
+        init_tools.init_logger(stub_b)
+
+        # the two file handlers must target distinct files
+        _fh_a = [
+            h for h in stub_a.logger.handlers
+            if isinstance(h, logging.FileHandler)
+        ][0]
+        _fh_b = [
+            h for h in stub_b.logger.handlers
+            if isinstance(h, logging.FileHandler)
+        ][0]
+        assert _fh_a.baseFilename != _fh_b.baseFilename
+
+        # each instance's records land in its own file and nowhere else
+        stub_a.log_info('probe from a', verbosity=0)
+        stub_b.log_info('probe from b', verbosity=0)
+        with open(_fh_a.baseFilename, 'r') as _fa:
+            _lines_a = _fa.read()
+        with open(_fh_b.baseFilename, 'r') as _fb:
+            _lines_b = _fb.read()
+        assert _lines_a.count('probe from a') == 1
+        assert 'probe from b' not in _lines_a
+        assert _lines_b.count('probe from b') == 1
+        assert 'probe from a' not in _lines_b
+
     def test_import_attaches_only_nullhandler(self) -> None:
         """The package logger carries exactly one NullHandler after import."""
         _pkg_logger = logging.getLogger('pyDeltaRCM')
