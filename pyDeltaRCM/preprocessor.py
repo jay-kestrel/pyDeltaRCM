@@ -15,6 +15,7 @@ import numpy as np
 from pyDeltaRCM.shared_tools import (
     _get_version,
     custom_yaml_loader,
+    resolve_type_spec,
     set_random_seed,
     _scale_factor
 )
@@ -1550,10 +1551,7 @@ def _validate_config_dict(cfg: dict, schema: dict) -> List[Tuple[str, str]]:
     # so validation cannot drift from the model's own interpretation
     expected_types: dict = {}
     for k, v in schema.items():
-        if type(v["type"]) is not list:
-            expected_types[k] = [eval(v["type"])]
-        else:
-            expected_types[k] = [eval(_v) for _v in v["type"]]
+        expected_types[k] = resolve_type_spec(v["type"])
 
     for k in cfg.keys():
         if k in _preprocessor_only_keys:

@@ -1649,6 +1649,35 @@ class TestQolUtilityFlags:
         assert errors == []
         assert any("matrix" in w for w in warnings_)
 
+    def test_validate_unknown_type_name_raises(self) -> None:
+        # the schema's "type" metadata must resolve through the same
+        # allowlist the model uses (see #19's resolver); an unknown name
+        # raises a clear error instead of being evaluated
+        schema = preprocessor._load_default_schema()
+        schema["out_dir"] = dict(schema["out_dir"], type="not_a_real_type")
+
+        with pytest.raises(ValueError, match="Unknown or disallowed type name"):
+            preprocessor._validate_config_dict(
+                {"out_dir": "out", "timesteps": 5}, schema
+            )
+
+    def test_validate_type_metadata_never_executes(self, tmp_path: Path) -> None:
+        # a code payload in the schema's "type" field must fail through the
+        # allowlist resolver without executing, as the model's own path does
+        _marker = tmp_path / "pd3_should_not_exist"
+        schema = preprocessor._load_default_schema()
+        schema["out_dir"] = dict(
+            schema["out_dir"],
+            type=f"__import__('os').system('touch {_marker}')",
+        )
+
+        with pytest.raises(ValueError, match="Unknown or disallowed type name"):
+            preprocessor._validate_config_dict(
+                {"out_dir": "out", "timesteps": 5}, schema
+            )
+
+        assert not _marker.exists()
+
     # short-circuit wiring through the CLI parser
 
     def test_cli_new_flag_short_circuit(self, tmp_path: Path) -> None:
