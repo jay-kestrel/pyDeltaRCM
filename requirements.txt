@@ -1,5 +1,8 @@
+# runtime floor only: the pixel-comparison suite pins the matplotlib
+# minor in requirements-test.txt (see the comment there for the baseline
+# policy)
 matplotlib>=3.6.1
 scipy>=1.5
 netCDF4
 pyyaml>=5.1
-numpy
+numpy>=1.22

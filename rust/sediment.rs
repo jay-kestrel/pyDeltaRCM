@@ -328,7 +328,7 @@ fn route(
         }
         for step in 1..=config.stepmax {
             let weights = fields.weights(index, config)?;
-            let direction = super::choose_direction(&weights, rng.random::<f64>());
+            let direction = super::choose_direction(&weights, rng.random::<f64>())?;
             let next = fields.next_cell(index, direction)?;
             if config.sand {
                 let partition = f64::from(volumes.residual) / 2.0 / config.dt / config.dx;

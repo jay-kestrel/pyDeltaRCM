@@ -93,16 +93,22 @@ struct Routing {
     columns: usize,
 }
 
-fn choose_direction(weights: &[f64], uniform: f64) -> usize {
-    let target = uniform * weights.iter().sum::<f64>();
+fn choose_direction(weights: &[f64], uniform: f64) -> Result<usize, String> {
+    let total = weights.iter().sum::<f64>();
+    // Mirror the reference random_pick guard: a nonpositive (or NaN) total
+    // would silently pick direction 0 in the inverse-CDF scan.
+    if total <= 0.0 || total.is_nan() {
+        return Err("probability weights must have a positive total".into());
+    }
+    let target = uniform * total;
     let mut cumulative = 0.0;
     for (direction, weight) in weights.iter().enumerate() {
         cumulative += weight;
         if cumulative >= target {
-            return direction;
+            return Ok(direction);
         }
     }
-    8
+    Ok(8)
 }
 
 fn flux(
@@ -130,9 +136,11 @@ fn relocate(index: usize, fields: &Fields<'_>, config: &WaterConfig) -> usize {
     let fx = row as f64 - 1.0;
     let fy = col as f64 - config.ctr as f64;
     let magnitude = fx.hypot(fy);
-    // A zero transport vector cannot move a parcel; retain its location.
+    // A zero transport vector means the loop was detected at the origin
+    // (1, CTR); the reference relocates one row downstream of the loop
+    // cell instead of stranding the parcel at the vector origin.
     let (dr, dc) = if magnitude == 0.0 {
-        (0, 0)
+        (1, 0)
     } else {
         (
             (fx / magnitude * 5.0).round_ties_even() as i64,
@@ -210,7 +218,7 @@ fn route(
             directions[p] = if current[p] == 0 {
                 4
             } else {
-                choose_direction(&weights[index * 9..index * 9 + 9], rng.random::<f64>())
+                choose_direction(&weights[index * 9..index * 9 + 9], rng.random::<f64>())?
             };
             let d = directions[p];
             next[p] = if d == 4 {
@@ -688,4 +696,65 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(water_phase, module)?)?;
     module.add_function(wrap_pyfunction!(sediment::sediment_phase, module)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROWS: usize = 10;
+    const COLS: usize = 10;
+    const CTR: usize = 4;
+
+    fn test_config(stepmax: usize) -> WaterConfig {
+        WaterConfig {
+            stepmax,
+            l0: 1,
+            ctr: CTR,
+            columns: 8,
+            nsmooth: 1,
+            dx: 10.0,
+            qp: 10.0,
+            u0: 1.0,
+            h0: 1.0,
+            sea_level: 0.0,
+            slope: 0.001,
+            csmooth: 0.1,
+        }
+    }
+
+    fn zeros() -> Vec<f32> {
+        vec![0.0; ROWS * COLS]
+    }
+
+    #[test]
+    fn relocate_zero_transport_moves_one_row_downstream() {
+        let cells = vec![1i64; ROWS * COLS];
+        let zeros = zeros();
+        let fields = Fields {
+            rows: ROWS,
+            cols: COLS,
+            cells: &cells,
+            stage: &zeros,
+            eta: &zeros,
+            depth: &zeros,
+            uw: &zeros,
+            ux: &zeros,
+            uy: &zeros,
+        };
+        let config = test_config(5);
+        // Loop detected at the transport origin (1, CTR): Fx == Fy == 0.
+        let origin = COLS + CTR;
+        assert_eq!(relocate(origin, &fields, &config), 2 * COLS + CTR);
+    }
+
+    #[test]
+    fn choose_direction_rejects_nonpositive_total() {
+        // All-zero weights would silently pick direction 0 without a guard.
+        assert!(choose_direction(&[0.0; 9], 0.5).is_err());
+        assert!(choose_direction(&[f64::NAN; 9], 0.5).is_err());
+        // Sanity: positive weights still pick (uniform 9-cell pick, half the
+        // cumulative mass crossed at direction 4).
+        assert_eq!(choose_direction(&[1.0; 9], 0.5).unwrap(), 4);
+    }
 }

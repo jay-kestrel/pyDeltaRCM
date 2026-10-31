@@ -22,11 +22,11 @@ classifiers = [
 ]
 dependencies = [
     "importlib-resources; python_version < '3.12'",
-    "matplotlib",
+    "matplotlib>=3.6.1",
     "scipy",
     "netCDF4",
     "pyyaml",
-    "numpy"
+    "numpy>=1.22"
 ]
 readme = { file = "README.rst", content-type = "text/x-rst" }
 dynamic = ["version"]
